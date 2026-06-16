@@ -1,4 +1,7 @@
 /rally
 /tmp
+/rally-*
+*.exe
 *.test
 *.out
+.DS_Store

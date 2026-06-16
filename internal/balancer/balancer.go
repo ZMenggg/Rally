@@ -2,21 +2,22 @@ package balancer
 
 import (
 	"sync/atomic"
+
+	"github.com/ZMenggg/Rally/internal/proxy"
 )
 
-// Backend is an abstract proxy backend.
+// Backend wraps a proxy.ConnProvider with load-balancing metadata.
 type Backend struct {
-	Name   string
-	Addr   string // SOCKS5 address of this backend (e.g., "127.0.0.1:1081")
-	Weight int
+	Name     string
+	Provider proxy.ConnProvider
+	Weight   int
 
-	active int64 // atomic: current active connections
+	active int64
 }
 
 // BackendInfo is returned for status reporting.
 type BackendInfo struct {
 	Name      string `json:"name"`
-	Addr      string `json:"addr"`
 	Active    int64  `json:"active"`
 	Connected bool   `json:"connected"`
 }
@@ -24,13 +25,21 @@ type BackendInfo struct {
 // Balancer distributes connections across backends.
 type Balancer struct {
 	backends []*Backend
+	strategy string
 	counter  atomic.Uint64
 }
 
-// New creates a Balancer with the given backends.
-func New(backends []*Backend) *Balancer {
+// NewWithStrategy creates a Balancer with a specific strategy.
+func NewWithStrategy(backends []*Backend, strategy string) *Balancer {
+	switch strategy {
+	case "leastconn", "roundrobin":
+		// supported
+	default:
+		strategy = "roundrobin"
+	}
 	return &Balancer{
 		backends: backends,
+		strategy: strategy,
 	}
 }
 
@@ -39,10 +48,31 @@ func (b *Balancer) Next() *Backend {
 	if len(b.backends) == 0 {
 		return nil
 	}
-	// Round-robin
+
+	switch b.strategy {
+	case "leastconn":
+		return b.leastConn()
+	default:
+		return b.roundRobin()
+	}
+}
+
+func (b *Balancer) roundRobin() *Backend {
 	n := b.counter.Add(1) - 1
-	idx := int(n) % len(b.backends)
-	return b.backends[idx]
+	return b.backends[int(n)%len(b.backends)]
+}
+
+func (b *Balancer) leastConn() *Backend {
+	best := b.backends[0]
+	bestActive := atomic.LoadInt64(&best.active)
+	for _, be := range b.backends[1:] {
+		a := atomic.LoadInt64(&be.active)
+		if a < bestActive {
+			best = be
+			bestActive = a
+		}
+	}
+	return best
 }
 
 // Acquire marks a connection as active on a backend.
@@ -66,7 +96,6 @@ func (b *Balancer) Info() []BackendInfo {
 	for i, be := range b.backends {
 		info[i] = BackendInfo{
 			Name:      be.Name,
-			Addr:      be.Addr,
 			Active:    atomic.LoadInt64(&be.active),
 			Connected: true,
 		}
