@@ -9,41 +9,57 @@ import (
 
 // Config is the top-level configuration for Rally.
 type Config struct {
-	Bind    string     `yaml:"bind"`
-	Balance string     `yaml:"balance"`
-	Log     LogConfig  `yaml:"log"`
-	VPS     []VPS      `yaml:"vps"`
+	Bind    string     `yaml:"bind"    json:"bind"`
+	Balance string     `yaml:"balance" json:"balance"`
+	Log     LogConfig  `yaml:"log"     json:"log"`
+	VPS     []VPS      `yaml:"vps"     json:"vps"`
 }
 
 type LogConfig struct {
-	Level  string `yaml:"level"`
-	Output string `yaml:"output"`
+	Level  string `yaml:"level" json:"level"`
+	Output string `yaml:"output" json:"output"`
 }
 
 // VPS represents a single VPS backend.
 type VPS struct {
-	Name     string `yaml:"name"`
-	Type     string `yaml:"type"`
-	Server   string `yaml:"server"`
-	Port     int    `yaml:"port"`
-	Password string `yaml:"password"`
-	SNI      string `yaml:"sni,omitempty"`
+	Name     string `yaml:"name"     json:"name"`
+	Type     string `yaml:"type"     json:"type"`
+	Server   string `yaml:"server"   json:"server"`
+	Port     int    `yaml:"port"     json:"port"`
+	Password string `yaml:"password" json:"password"`
+	SNI      string `yaml:"sni,omitempty"     json:"sni,omitempty"`
+
+	// Cipher method for Shadowsocks (e.g. "AEAD_CHACHA20_POLY1305")
+	Cipher string `yaml:"cipher,omitempty"   json:"cipher,omitempty"`
+
+	// UUID for VLESS protocol
+	UUID string `yaml:"uuid,omitempty" json:"uuid,omitempty"`
+	// Flow control for VLESS (e.g. "xtls-rprx-vision")
+	Flow string `yaml:"flow,omitempty" json:"flow,omitempty"`
 
 	// Bandwidth in Mbps (optional, Hysteria2 specific)
-	DownMbps int `yaml:"down_mbps,omitempty"`
-	UpMbps   int `yaml:"up_mbps,omitempty"`
+	DownMbps int `yaml:"down_mbps,omitempty" json:"down_mbps,omitempty"`
+	UpMbps   int `yaml:"up_mbps,omitempty"   json:"up_mbps,omitempty"`
 
 	// Health check
-	HealthTimeout int `yaml:"health_timeout,omitempty"`
+	HealthTimeout int `yaml:"health_timeout,omitempty" json:"health_timeout,omitempty"`
+
+	// Enabled controls whether this node participates in bandwidth aggregation.
+	// Defaults to true if not set.
+	Enabled *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 }
 
-// Load reads and parses a YAML config file.
+// Load reads and parses a YAML config file from disk.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
+	return LoadBytes(data)
+}
 
+// LoadBytes parses a YAML config from raw bytes and applies defaults.
+func LoadBytes(data []byte) (*Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)

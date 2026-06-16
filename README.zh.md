@@ -8,27 +8,34 @@
 
 ---
 
+## 特性
+
+- **多协议支持** — Hysteria2、SOCKS5、Shadowsocks、Trojan、VLESS
+- **带宽聚合** — 连接级 roundrobin / leastconn 负载均衡
+- **Web 管理界面** — 可视化节点管理、实时流量监控、日志查看（中英文）
+- **热重载** — `SIGHUP` 信号触发配置重载，无需重启进程
+- **实时监控** — 每节点速率、总吞吐量、累计流量一目了然
+- **节点开关** — 仪表盘一键启用/禁用节点
+
 ## 架构
 
-```
-应用 (MeTube / qBittorrent / curl / 任何支持 SOCKS5 的软件)
+```text
+应用 (任何支持 SOCKS5 的软件)
     │  socks5://127.0.0.1:1080
     ▼
-┌────────────────────────────────────┐
-│           Rally                    │
-│                                    │
-│  ┌─ TCP roundrobin 转发 ────────┐  │
-│  │    连接级负载均衡             │  │
-│  └──────┬──────────┬────────────┘  │
-│         │          │              │
-│  ┌──────▼──┐  ┌────▼──────────┐   │
-│  │Hysteria2│  │Hysteria2      │   │
-│  │ → VPS 1 │  │ → VPS 2      │   │
-│  └─────────┘  └───────────────┘   │
-└────────────────────────────────────┘
+┌──────────────────────────────────────────┐
+│              Rally                       │
+│                                          │
+│  ┌─── SOCKS5 处理 + 负载均衡 ─────────┐  │
+│  │   连接级 roundrobin / leastconn     │  │
+│  └──────┬──────────┬────────┬─────────┘  │
+│         │          │        │           │
+│  ┌──────▼──┐ ┌────▼──┐ ┌───▼──────┐    │
+│  │Hysteria2│ │  SS   │ │ Trojan   │    │
+│  │ → VPS 1 │ │→ VPS 2│ │ → VPS 3 │    │
+│  └─────────┘ └───────┘ └──────────┘    │
+└──────────────────────────────────────────┘
 ```
-
-每个新 TCP 连接轮询分发给不同 VPS。配合多路并发的下载工具（MeTube、qBittorrent、浏览器等），带宽自然叠加。
 
 ## 快速开始
 
@@ -37,36 +44,101 @@
 ```yaml
 # rally.yaml
 bind: ":1080"
+balance: roundrobin
+
 vps:
-  - name: us1
+  - name: hk1
     type: hysteria2
-    server: your-server.com
+    server: hk1.example.com
     port: 23872
     password: "your-password"
     down_mbps: 500
-  - name: us2
-    type: hysteria2
-    server: your-second-server.com
-    port: 44705
-    password: "your-password"
+
+  - name: jp1
+    type: ss
+    server: jp1.example.com
+    port: 8388
+    password: "ss-password"
+    cipher: AEAD_CHACHA20_POLY1305
 ```
 
 ### 2. 运行
 
 ```bash
-# Docker（推荐）
-docker run -d -p 1080:1080 -v ./rally.yaml:/etc/rally.yaml ghcr.io/zmenggg/rally:latest
-
 # 裸机
 rally run -c rally.yaml
+
+# 同时启动 Web 管理界面（默认 :9090）
+rally run -c rally.yaml --web
+
+# Docker
+docker run -d -p 1080:1080 -p 9090:9090 \
+  -v ./rally.yaml:/etc/rally.yaml \
+  ghcr.io/zmenggg/rally:latest
 ```
 
 ### 3. 使用
 
 ```bash
-# 任何支持 SOCKS5 的应用
 curl -x socks5://127.0.0.1:1080 https://www.youtube.com/watch?v=...
 ```
+
+打开 http://localhost:9090 查看 Web 管理界面。
+
+## 配置参考
+
+```yaml
+bind: ":1080"              # SOCKS5 监听地址
+balance: roundrobin        # 负载均衡: roundrobin | leastconn
+
+log:
+  level: info              # debug | info | warn | error
+  output: ""               # 日志文件路径(空=stderr)
+
+vps:
+  - name: my-node          # 节点名称
+    type: hysteria2        # 协议: hysteria2 / socks5 / ss / trojan / vless
+    server: 1.2.3.4        # 服务器地址
+    port: 23872            # 服务器端口
+    password: "secret"     # 认证密码
+    sni: ""                # TLS SNI（默认用 server）
+    enabled: true          # 是否启用（默认 true）
+
+    # Shadowsocks 专用
+    cipher: AEAD_CHACHA20_POLY1305  # 加密方式
+
+    # VLESS 专用
+    uuid: "..."            # UUID
+    flow: "xtls-rprx-vision"  # 流控
+
+    # Hysteria2 专用
+    down_mbps: 500         # 下行带宽
+    up_mbps: 50            # 上行带宽
+```
+
+## CLI 命令
+
+| 命令 | 说明 |
+|------|------|
+| `rally run -c rally.yaml` | 启动代理 |
+| `rally run -c rally.yaml --web` | 启动代理 + Web UI |
+| `rally run -c rally.yaml --web :8888` | 指定 Web UI 端口 |
+| `rally web -c rally.yaml` | 仅启动 Web UI |
+| `rally web -c rally.yaml --addr :8888` | 指定端口 |
+| `rally check -c rally.yaml` | 校验配置 |
+| `rally reload` | 发送 SIGHUP 热重载 |
+| `rally version` | 版本信息 |
+
+## Web UI
+
+| 页面 | 功能 |
+|------|------|
+| **Dashboard** | 节点状态、实时速率、汇总流量、节点开关 |
+| **Nodes** | 可视化添加/编辑/删除节点 |
+| **Config** | YAML 源码编辑器 |
+| **Logs** | 实时日志查看（SSE 推送） |
+
+支持 **中文 / English** 界面切换。
 
 ## 带宽聚合原理
 
@@ -80,45 +152,18 @@ Rally 做的是 **连接级聚合**，不是数据包级聚合：
 
 **最佳实践：** 配合支持多路并发的下载工具（MeTube 默认 12 路、qBittorrent、curl --parallel、yt-dlp），聚合效果最明显。
 
-## 配置参考
-
-```yaml
-bind: ":1080"              # SOCKS5 监听地址
-balance: roundrobin        # 负载均衡策略
-
-log:
-  level: info              # debug | info | warn | error
-
-vps:
-  - name: us1              # 任意标识名
-    type: hysteria2        # 协议类型
-    server: 192.0.2.1      # VPS 地址
-    port: 23872            # Hysteria2 端口
-    password: "secret"     # 认证密码
-    sni: ""                # TLS SNI（默认使用 server）
-    down_mbps: 500         # 最大下行带宽 (Mbps)
-    up_mbps: 50            # 最大上行带宽 (Mbps)
-```
-
-## CLI 命令
-
-```bash
-rally run [--config rally.yaml]     启动代理
-rally check [--config rally.yaml]   校验配置
-rally list [--config rally.yaml]    列出后端
-rally version                       版本信息
-```
-
 ## 与旧方案对比
 
 | 特性 | sing-box + HAProxy | Rally |
 |------|-------------------|-------|
-| 组件数 | 2 容器 (GPLv3 + C) | 1 二进制 (MIT) |
+| 组件数 | 2 容器 | 1 二进制 |
+| 许可证 | GPLv3 | MIT |
 | 配置格式 | JSON + CFG | YAML |
-| 热加载 | ❌ | ⏳ 规划中 |
-| 可移植性 | 仅 Docker | Docker + 裸机 |
-| 健康检查 | TCP 仅 | ⏳ 规划中 |
-| 统计面板 | ❌ | ⏳ 规划中 |
+| 协议支持 | Hysteria2 | Hysteria2 / SOCKS5 / SS / Trojan / VLESS |
+| 热加载 | ❌ | ✅ SIGHUP |
+| 管理面板 | ❌ | ✅ Web UI（中英文） |
+| 流量监控 | ❌ | ✅ 实时速率 + 累计流量 |
+| 部署方式 | Docker 仅 | Docker + 裸机 |
 
 ## 开发
 

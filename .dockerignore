@@ -2,3 +2,5 @@
 .gitignore
 *.md
 /tmp
+*.exe
+.DS_Store

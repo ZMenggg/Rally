@@ -1,67 +1,162 @@
 package proxy
 
 import (
-	"io"
-	"log"
 	"net"
+	"sync"
+	"time"
+
+	"github.com/ZMenggg/Rally/internal/logger"
 )
 
-// Forwarder handles proxying TCP connections from a local listener
-// to backend SOCKS5 proxies in a round-robin fashion.
+// ConnProvider provides a pre-established connection to a backend.
+type ConnProvider interface {
+	Dial(addr string) (net.Conn, error)
+	Name() string
+}
+
+// Backend wraps a ConnProvider with its display name.
+type Backend struct {
+	Name string
+	ConnProvider
+}
+
+// BackendPicker returns the next Backend to use and a release function.
+type BackendPicker func() (*Backend, func())
+
+// Forwarder handles proxying TCP connections.
 type Forwarder struct {
-	next func() string // returns backend address
+	pick       BackendPicker
+	listener   net.Listener
+	stats      map[string]*ConnStats
+	statsMu    sync.RWMutex
+	tickDone   chan struct{}
 }
 
-// NewForwarder creates a Forwarder that picks backends via the given function.
-func NewForwarder(next func() string) *Forwarder {
-	return &Forwarder{next: next}
+// NewForwarder creates a Forwarder.
+func NewForwarder(pick BackendPicker) *Forwarder {
+	return &Forwarder{
+		pick:     pick,
+		stats:    make(map[string]*ConnStats),
+		tickDone: make(chan struct{}),
+	}
 }
 
-// Serve starts a TCP listener and forwards connections.
+// GetOrCreateStats returns the ConnStats for a given provider name.
+func (f *Forwarder) GetOrCreateStats(name string, provider ConnProvider) *ConnStats {
+	f.statsMu.Lock()
+	defer f.statsMu.Unlock()
+	if s, ok := f.stats[name]; ok {
+		return s
+	}
+	s := NewConnStats(name, provider)
+	f.stats[name] = s
+	return s
+}
+
+// AllStats returns a snapshot of all stats.
+func (f *Forwarder) AllStats() []RatesSnapshot {
+	f.statsMu.RLock()
+	names := make([]string, 0, len(f.stats))
+	for name := range f.stats {
+		names = append(names, name)
+	}
+	f.statsMu.RUnlock()
+
+	result := make([]RatesSnapshot, 0, len(names))
+	for _, name := range names {
+		f.statsMu.RLock()
+		s := f.stats[name]
+		f.statsMu.RUnlock()
+		if s != nil {
+			result = append(result, s.Snapshot())
+		}
+	}
+	return result
+}
+
+// tickAll calls Tick on all stats.
+func (f *Forwarder) tickAll() {
+	f.statsMu.RLock()
+	stats := make([]*ConnStats, 0, len(f.stats))
+	for _, s := range f.stats {
+		stats = append(stats, s)
+	}
+	f.statsMu.RUnlock()
+	for _, s := range stats {
+		s.Tick()
+	}
+}
+
+// Serve starts a TCP listener.
 func (f *Forwarder) Serve(addr string) error {
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
-	defer listener.Close()
+	f.listener = listener
 
-	log.Printf("SOCKS5 proxy listening on %s", addr)
+	logger.Info("SOCKS5 proxy listening on %s", addr)
+
+	// Start ticker for rate calculation
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				f.tickAll()
+			case <-f.tickDone:
+				return
+			}
+		}
+	}()
 
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			log.Printf("accept error: %v", err)
-			continue
+			if ne, ok := err.(net.Error); ok && ne.Temporary() {
+				logger.Warn("accept error: %v", err)
+				continue
+			}
+			return err
 		}
 		go f.handleConn(conn)
+	}
+}
+
+// Stop closes the listener.
+func (f *Forwarder) Stop() {
+	close(f.tickDone)
+	if f.listener != nil {
+		f.listener.Close()
 	}
 }
 
 func (f *Forwarder) handleConn(client net.Conn) {
 	defer client.Close()
 
-	backendAddr := f.next()
-	if backendAddr == "" {
-		log.Printf("no backends available")
+	backend, release := f.pick()
+	if backend == nil {
+		logger.Warn("no backends available")
 		return
 	}
-
-	backend, err := net.Dial("tcp", backendAddr)
-	if err != nil {
-		log.Printf("dial backend %s: %v", backendAddr, err)
-		return
+	if release != nil {
+		defer release()
 	}
-	defer backend.Close()
 
-	// Bidirectional copy
-	done := make(chan struct{}, 2)
-	go func() {
-		io.Copy(backend, client)
-		done <- struct{}{}
-	}()
-	go func() {
-		io.Copy(client, backend)
-		done <- struct{}{}
-	}()
-	<-done
+	// Get or create stats tracker for this backend
+	stats := f.GetOrCreateStats(backend.Name, backend.ConnProvider)
+
+	sp := &SOCKS5Proxy{
+		Dial: func(addr string) (net.Conn, error) {
+			raw, err := backend.Dial(addr)
+			if err != nil {
+				return nil, err
+			}
+			// Wrap the tunnel connection with counting
+			return raw, nil
+		},
+		Stats: stats,
+	}
+	sp.Handle(client)
 }

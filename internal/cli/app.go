@@ -2,11 +2,14 @@ package cli
 
 import (
 	"fmt"
-	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/ZMenggg/Rally/internal/config"
+	"github.com/ZMenggg/Rally/internal/logger"
 	"github.com/ZMenggg/Rally/internal/runner"
+	"github.com/ZMenggg/Rally/internal/web"
 )
 
 // App is the CLI application.
@@ -27,6 +30,8 @@ func (a *App) Run(args []string) error {
 	switch cmd {
 	case "run":
 		return a.runServer(args[2:])
+	case "web":
+		return a.runWeb(args[2:])
 	case "check":
 		return a.check(args[2:])
 	case "list":
@@ -42,7 +47,6 @@ func (a *App) Run(args []string) error {
 }
 
 func (a *App) resolveConfig(args []string) (string, error) {
-	// Check --config flag
 	for i, arg := range args {
 		if arg == "--config" || arg == "-c" {
 			if i+1 < len(args) {
@@ -51,7 +55,6 @@ func (a *App) resolveConfig(args []string) (string, error) {
 			return "", fmt.Errorf("--config requires a path")
 		}
 	}
-	// Search default paths
 	for _, p := range []string{"./rally.yaml", "/etc/rally.yaml"} {
 		if _, err := os.Stat(p); err == nil {
 			return p, nil
@@ -60,25 +63,137 @@ func (a *App) resolveConfig(args []string) (string, error) {
 	return "", fmt.Errorf("no config found (try --config or place rally.yaml in current dir)")
 }
 
+func (a *App) parseFlags(args []string) (rest []string, flags map[string]string) {
+	flags = make(map[string]string)
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--" {
+			rest = append(rest, args[i+1:]...)
+			break
+		}
+		if len(args[i]) > 2 && args[i][:2] == "--" {
+			key := args[i][2:]
+			if i+1 < len(args) && args[i+1][0] != '-' {
+				flags[key] = args[i+1]
+				i++
+			} else {
+				flags[key] = "true"
+			}
+		} else {
+			rest = append(rest, args[i])
+		}
+	}
+	return
+}
+
 func (a *App) printUsage() error {
-	fmt.Println(`Rally — Multi-VPS bandwidth aggregation proxy
+	fmt.Print(`Rally — Multi-VPS bandwidth aggregation proxy
 
 Usage:
-  rally run [--config rally.yaml]     Start the proxy server
-  rally check [--config rally.yaml]   Validate configuration
-  rally list [--config rally.yaml]    List backends and health
-  rally reload [--config rally.yaml]  Reload configuration
-  rally version                       Print version
+  rally run [--config rally.yaml] [--web [addr]]   Start the proxy server
+  rally web [--config rally.yaml] [--addr :9090]    Start Web UI only (config management)
+  rally check [--config rally.yaml]                  Validate configuration
+  rally list [--config rally.yaml]                   List backends and health
+  rally reload [--config rally.yaml]                 Reload configuration (sends SIGHUP)
+  rally version                                      Print version
 
 Examples:
   rally run -c ./rally.yaml
+  rally run -c ./rally.yaml --web :9090
+  rally web --addr :9090
   rally check
-  rally list
 `)
 	return nil
 }
 
+// ─── run ─────────────────────────────────────────────────────────────────────
+
 func (a *App) runServer(args []string) error {
+	rest, flags := a.parseFlags(args)
+	configPath, err := a.resolveConfig(rest)
+	if err != nil {
+		return err
+	}
+
+	// Load initial config
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	// Init logger
+	logFile := cfg.Log.Output
+	if err := logger.Init(cfg.Log.Level, logFile); err != nil {
+		return fmt.Errorf("init logger: %w", err)
+	}
+
+	// Start Web UI if --web flag is set
+	var ws *web.Server
+	if webAddr, ok := flags["web"]; ok {
+		addr := webAddr
+		if addr == "true" {
+			addr = ":9090"
+		}
+		ws = web.New(cfg, configPath)
+		if err := ws.Start(addr); err != nil {
+			return fmt.Errorf("web ui: %w", err)
+		}
+		defer ws.Stop()
+	}
+
+	r := runner.New(cfg)
+
+	// Handle SIGHUP for hot reload
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGHUP)
+	// Write PID file
+	os.WriteFile("/tmp/rally.pid", []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
+
+	go func() {
+		for range sigCh {
+			logger.Info("Received SIGHUP, reloading config...")
+			newCfg, err := config.Load(configPath)
+			if err != nil {
+				logger.Error("Reload config failed: %v", err)
+				continue
+			}
+			if ws != nil {
+				ws.UpdateConfig(newCfg)
+			}
+			if err := r.ReloadConfig(newCfg); err != nil {
+				logger.Error("Reload failed: %v", err)
+				continue
+			}
+			logger.Info("Config reloaded successfully")
+		}
+	}()
+
+	// Pass real status to Web UI
+	if ws != nil {
+		ws.SetStatusFn(func() []web.BackendStatus {
+			b := r.Balancer()
+			if b == nil {
+				return nil
+			}
+			info := b.Info()
+			var out []web.BackendStatus
+			for _, be := range info {
+				out = append(out, web.BackendStatus{
+					Name:      be.Name,
+					Connected: be.Connected,
+					Active:    be.Active,
+				})
+			}
+			return out
+		})
+	}
+	err = r.Run()
+	defer r.Close()
+	return err
+}
+
+// ─── web ─────────────────────────────────────────────────────────────────────
+
+func (a *App) runWeb(args []string) error {
 	configPath, err := a.resolveConfig(args)
 	if err != nil {
 		return err
@@ -87,10 +202,47 @@ func (a *App) runServer(args []string) error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
-	log.Printf("Rally starting with %d VPS backend(s)", len(cfg.VPS))
-	r := runner.New(cfg)
-	return r.Run()
+
+	logFile := cfg.Log.Output
+	if err := logger.Init(cfg.Log.Level, logFile); err != nil {
+		return fmt.Errorf("init logger: %w", err)
+	}
+
+	addr := ":9090"
+	for i, arg := range args {
+		if arg == "--addr" && i+1 < len(args) {
+			addr = args[i+1]
+		}
+	}
+
+	logger.Info("Rally Web UI starting, config=%s", configPath)
+	ws := web.New(cfg, configPath)
+	if err := ws.Start(addr); err != nil {
+		return fmt.Errorf("web ui: %w", err)
+	}
+
+	// Handle SIGHUP
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGHUP)
+	// Write PID file
+	os.WriteFile("/tmp/rally.pid", []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
+	go func() {
+		for range sigCh {
+			logger.Info("Received SIGHUP, reloading config...")
+			newCfg, err := config.Load(configPath)
+			if err != nil {
+				logger.Error("Reload config failed: %v", err)
+				continue
+			}
+			ws.UpdateConfig(newCfg)
+			logger.Info("Config reloaded successfully")
+		}
+	}()
+
+	select {}
 }
+
+// ─── check ───────────────────────────────────────────────────────────────────
 
 func (a *App) check(args []string) error {
 	configPath, err := a.resolveConfig(args)
@@ -109,6 +261,8 @@ func (a *App) check(args []string) error {
 	return nil
 }
 
+// ─── list ────────────────────────────────────────────────────────────────────
+
 func (a *App) listBackends(args []string) error {
 	configPath, err := a.resolveConfig(args)
 	if err != nil {
@@ -125,8 +279,20 @@ func (a *App) listBackends(args []string) error {
 	return nil
 }
 
+// ─── reload ──────────────────────────────────────────────────────────────────
+
 func (a *App) reload(args []string) error {
-	// TODO: send SIGHUP to running process
-	fmt.Println("Reload not yet implemented in v0.1.0, use: docker restart rally")
-	return nil
+	// Send SIGHUP to running rally process
+	// Find PID from a lock file or use killall
+	pidFile := "/tmp/rally.pid"
+	if data, err := os.ReadFile(pidFile); err == nil {
+		var pid int
+		fmt.Sscanf(string(data), "%d", &pid)
+		if p, err := os.FindProcess(pid); err == nil {
+			return p.Signal(syscall.SIGHUP)
+		}
+	}
+	// Fallback: try looking for rally process
+	fmt.Println("Looking for running rally process...")
+	return fmt.Errorf("could not find running rally process. Try: killall -HUP rally")
 }
