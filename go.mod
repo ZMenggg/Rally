@@ -1,4 +1,4 @@
-module github.com/ZMenggg/Rally
+module github.com/ZMenggg/Rally-go
 
 go 1.24.0
 

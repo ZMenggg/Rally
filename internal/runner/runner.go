@@ -9,10 +9,10 @@ import (
 
 	hyclient "github.com/apernet/hysteria/core/v2/client"
 
-	"github.com/ZMenggg/Rally/internal/balancer"
-	"github.com/ZMenggg/Rally/internal/config"
-	"github.com/ZMenggg/Rally/internal/logger"
-	"github.com/ZMenggg/Rally/internal/proxy"
+	"github.com/ZMenggg/Rally-go/internal/balancer"
+	"github.com/ZMenggg/Rally-go/internal/config"
+	"github.com/ZMenggg/Rally-go/internal/logger"
+	"github.com/ZMenggg/Rally-go/internal/proxy"
 )
 
 // Runner manages the lifecycle of the proxy server.

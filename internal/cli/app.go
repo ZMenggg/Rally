@@ -8,11 +8,11 @@ import (
 	"strconv"
 	"syscall"
 
-	"github.com/ZMenggg/Rally/internal/config"
-	"github.com/ZMenggg/Rally/internal/logger"
-	"github.com/ZMenggg/Rally/internal/proxy"
-	"github.com/ZMenggg/Rally/internal/runner"
-	"github.com/ZMenggg/Rally/internal/web"
+	"github.com/ZMenggg/Rally-go/internal/config"
+	"github.com/ZMenggg/Rally-go/internal/logger"
+	"github.com/ZMenggg/Rally-go/internal/proxy"
+	"github.com/ZMenggg/Rally-go/internal/runner"
+	"github.com/ZMenggg/Rally-go/internal/web"
 )
 
 // App is the CLI application.

@@ -7,7 +7,7 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/ZMenggg/Rally/internal/logger"
+	"github.com/ZMenggg/Rally-go/internal/logger"
 )
 
 const (

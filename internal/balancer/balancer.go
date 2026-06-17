@@ -3,7 +3,7 @@ package balancer
 import (
 	"sync/atomic"
 
-	"github.com/ZMenggg/Rally/internal/proxy"
+	"github.com/ZMenggg/Rally-go/internal/proxy"
 )
 
 // Backend wraps a proxy.ConnProvider with load-balancing metadata.

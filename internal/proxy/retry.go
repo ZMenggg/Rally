@@ -5,7 +5,7 @@ import (
 	"net"
 	"sync/atomic"
 
-	"github.com/ZMenggg/Rally/internal/logger"
+	"github.com/ZMenggg/Rally-go/internal/logger"
 )
 
 // RetryProvider wraps a ConnProvider and automatically reconnects on Dial failure.

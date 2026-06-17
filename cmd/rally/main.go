@@ -4,7 +4,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/ZMenggg/Rally/internal/cli"
+	"github.com/ZMenggg/Rally-go/internal/cli"
 )
 
 func main() {

@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ZMenggg/Rally/internal/logger"
+	"github.com/ZMenggg/Rally-go/internal/logger"
 )
 
 // ConnProvider provides a pre-established connection to a backend.
