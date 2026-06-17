@@ -64,6 +64,8 @@ vps:
     cipher: AEAD_CHACHA20_POLY1305
 ```
 
+> **⚠️ TLS Note**: Hysteria2 uses TLS for transport. If your VPS uses a self-signed certificate, or `sni` points to an IP instead of the certificate's domain, you **must** set `insecure: true`. Always set `sni` to the domain name on your VPS certificate.
+
 ### 2. Run
 
 ```bash

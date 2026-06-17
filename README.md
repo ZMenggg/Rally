@@ -63,6 +63,8 @@ vps:
     cipher: AEAD_CHACHA20_POLY1305
 ```
 
+> **⚠️ TLS 注意**：Hysteria2 使用 TLS 加密传输。如果 VPS 的证书是自签名、或 `sni` 指向 IP 而非证书域名，必须设置 `insecure: true`。建议始终将 `sni` 设为 VPS 证书的域名。
+
 ### 2. 运行
 
 ```bash
