@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"math"
+	"net"
 	"sync"
 	"time"
 )
@@ -30,6 +31,19 @@ func (s *ConnStats) Add(read, write int64) {
 	s.mu.Lock()
 	s.readBytes += read
 	s.writeBytes += write
+	s.mu.Unlock()
+}
+
+// Reset zeroes all counters and rates.
+func (s *ConnStats) Reset() {
+	s.mu.Lock()
+	s.readBytes = 0
+	s.writeBytes = 0
+	s.lastRead = 0
+	s.lastWrite = 0
+	s.readRate = 0
+	s.writeRate = 0
+	s.lastCheck = time.Time{}
 	s.mu.Unlock()
 }
 
@@ -71,4 +85,38 @@ func (s *ConnStats) Snapshot() RatesSnapshot {
 		ReadTotal:  s.readBytes,
 		WriteTotal: s.writeBytes,
 	}
+}
+
+// statsConn wraps a net.Conn to track bytes transferred incrementally.
+// On each Read/Write it reports to ConnStats for real-time rate tracking.
+type statsConn struct {
+	net.Conn
+	stats *ConnStats
+}
+
+// newStatsConn wraps an existing net.Conn with stats tracking.
+func newStatsConn(conn net.Conn, stats *ConnStats) *statsConn {
+	return &statsConn{Conn: conn, stats: stats}
+}
+
+func (c *statsConn) Read(b []byte) (int, error) {
+	n, err := c.Conn.Read(b)
+	if n > 0 {
+		// bytes received from remote → client download = write
+		c.stats.Add(0, int64(n))
+	}
+	return n, err
+}
+
+func (c *statsConn) Write(b []byte) (int, error) {
+	n, err := c.Conn.Write(b)
+	if n > 0 {
+		// bytes sent to remote → client upload = read
+		c.stats.Add(int64(n), 0)
+	}
+	return n, err
+}
+
+func (c *statsConn) Close() error {
+	return c.Conn.Close()
 }

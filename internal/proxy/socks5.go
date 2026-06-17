@@ -11,21 +11,20 @@ import (
 )
 
 const (
-	socksVer5          = 0x05
-	socksCmdConnect    = 0x01
-	socksAtypIPv4      = 0x01
-	socksAtypDomain    = 0x03
-	socksAtypIPv6      = 0x04
-	socksRepSuccess    = 0x00
-	socksRepFailure    = 0x01
-	socksRepNotAllowed = 0x02
+	socksVer5           = 0x05
+	socksCmdConnect     = 0x01
+	socksAtypIPv4       = 0x01
+	socksAtypDomain     = 0x03
+	socksAtypIPv6       = 0x04
+	socksRepSuccess     = 0x00
+	socksRepFailure     = 0x01
+	socksRepNotAllowed  = 0x02
 	socksRepUnreachable = 0x04
 )
 
 // SOCKS5Proxy handles a single SOCKS5 connection.
 type SOCKS5Proxy struct {
-	Dial  func(addr string) (net.Conn, error)
-	Stats *ConnStats // optional, for traffic accounting
+	Dial func(addr string) (net.Conn, error)
 }
 
 // Handle processes a SOCKS5 handshake.
@@ -48,28 +47,19 @@ func (p *SOCKS5Proxy) Handle(client net.Conn) {
 
 	p.sendReply(client, socksRepSuccess, nil)
 
-	// Bidirectional copy with stats tracking
-	var readTotal, writeTotal int64
-
+	// Bidirectional copy (stats tracked via statsConn wrapper)
 	done := make(chan struct{}, 2)
 
 	go func() {
-		n, _ := io.Copy(remote, client)
-		readTotal = n
+		io.Copy(remote, client)
 		done <- struct{}{}
 	}()
 	go func() {
-		n, _ := io.Copy(client, remote)
-		writeTotal = n
+		io.Copy(client, remote)
 		done <- struct{}{}
 	}()
 	<-done
 	<-done
-
-	// Report stats
-	if p.Stats != nil {
-		p.Stats.Add(readTotal, writeTotal)
-	}
 }
 
 // negotiate performs SOCKS5 handshake and returns target address.

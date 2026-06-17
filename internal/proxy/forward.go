@@ -25,11 +25,12 @@ type BackendPicker func() (*Backend, func())
 
 // Forwarder handles proxying TCP connections.
 type Forwarder struct {
-	pick       BackendPicker
-	listener   net.Listener
-	stats      map[string]*ConnStats
-	statsMu    sync.RWMutex
-	tickDone   chan struct{}
+	pick     BackendPicker
+	listener net.Listener
+	stats    map[string]*ConnStats
+	statsMu  sync.RWMutex
+	tickDone chan struct{}
+	stopOnce sync.Once
 }
 
 // NewForwarder creates a Forwarder.
@@ -72,6 +73,15 @@ func (f *Forwarder) AllStats() []RatesSnapshot {
 		}
 	}
 	return result
+}
+
+// ResetStats zeroes all traffic counters.
+func (f *Forwarder) ResetStats() {
+	f.statsMu.Lock()
+	defer f.statsMu.Unlock()
+	for _, s := range f.stats {
+		s.Reset()
+	}
 }
 
 // tickAll calls Tick on all stats.
@@ -118,7 +128,13 @@ func (f *Forwarder) Serve(addr string) error {
 				logger.Warn("accept error: %v", err)
 				continue
 			}
-			return err
+			// Check if listener was closed by Stop() (SIGHUP reload)
+			select {
+			case <-f.tickDone:
+				return nil // graceful shutdown, not an error
+			default:
+				return err
+			}
 		}
 		go f.handleConn(conn)
 	}
@@ -126,16 +142,23 @@ func (f *Forwarder) Serve(addr string) error {
 
 // Stop closes the listener.
 func (f *Forwarder) Stop() {
-	close(f.tickDone)
-	if f.listener != nil {
-		f.listener.Close()
-	}
+	f.stopOnce.Do(func() {
+		close(f.tickDone)
+		if f.listener != nil {
+			f.listener.Close()
+		}
+	})
 }
 
 func (f *Forwarder) handleConn(client net.Conn) {
 	defer client.Close()
 
 	backend, release := f.pick()
+	if backend != nil {
+		logger.Debug("PICKED backend=%s", backend.Name)
+	} else {
+		logger.Debug("PICKED no backend available")
+	}
 	if backend == nil {
 		logger.Warn("no backends available")
 		return
@@ -153,10 +176,9 @@ func (f *Forwarder) handleConn(client net.Conn) {
 			if err != nil {
 				return nil, err
 			}
-			// Wrap the tunnel connection with counting
-			return raw, nil
+			// Wrap the tunnel connection with real-time counting
+			return newStatsConn(raw, stats), nil
 		},
-		Stats: stats,
 	}
 	sp.Handle(client)
 }

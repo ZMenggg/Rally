@@ -59,17 +59,18 @@ type LogEntry struct {
 
 // Logger is Rally's internal logger.
 type Logger struct {
-	level    Level
-	backend  *log.Logger
-	buf      []LogEntry
-	mu       sync.RWMutex
-	maxBuf   int
-	listeners []func(LogEntry)
+	level     Level
+	backend   *log.Logger
+	buf       []LogEntry
+	mu        sync.RWMutex
+	maxBuf    int
+	listeners map[int]func(LogEntry)
+	nextID    int
 }
 
 // Global singleton
 var (
-	global  *Logger
+	global   *Logger
 	globalMu sync.Mutex
 )
 
@@ -90,10 +91,11 @@ func Init(levelStr, outputPath string) error {
 	}
 
 	global = &Logger{
-		level:   level,
-		backend: log.New(w, "", 0),
-		buf:     make([]LogEntry, 0, 1000),
-		maxBuf:  1000,
+		level:     level,
+		backend:   log.New(w, "", 0),
+		buf:       make([]LogEntry, 0, 1000),
+		maxBuf:    1000,
+		listeners: make(map[int]func(LogEntry)),
 	}
 	return nil
 }
@@ -105,10 +107,11 @@ func G() *Logger {
 	if global == nil {
 		// Auto-init with defaults
 		global = &Logger{
-			level:   LevelInfo,
-			backend: log.New(os.Stderr, "", 0),
-			buf:     make([]LogEntry, 0, 1000),
-			maxBuf:  1000,
+			level:     LevelInfo,
+			backend:   log.New(os.Stderr, "", 0),
+			buf:       make([]LogEntry, 0, 1000),
+			maxBuf:    1000,
+			listeners: make(map[int]func(LogEntry)),
 		}
 	}
 	return global
@@ -126,12 +129,13 @@ func (l *Logger) SetLevel(level Level) {
 func (l *Logger) Subscribe(fn func(LogEntry)) func() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.listeners = append(l.listeners, fn)
-	idx := len(l.listeners) - 1
+	id := l.nextID
+	l.nextID++
+	l.listeners[id] = fn
 	return func() {
 		l.mu.Lock()
 		defer l.mu.Unlock()
-		l.listeners = append(l.listeners[:idx], l.listeners[idx+1:]...)
+		delete(l.listeners, id)
 	}
 }
 
@@ -163,8 +167,11 @@ func (l *Logger) log(level Level, format string, args ...interface{}) {
 	if len(l.buf) > l.maxBuf {
 		l.buf = l.buf[len(l.buf)-l.maxBuf:]
 	}
-	listeners := make([]func(LogEntry), len(l.listeners))
-	copy(listeners, l.listeners)
+	// Copy listeners map under lock
+	listeners := make(map[int]func(LogEntry), len(l.listeners))
+	for id, fn := range l.listeners {
+		listeners[id] = fn
+	}
 	l.mu.Unlock()
 
 	// Notify listeners outside lock

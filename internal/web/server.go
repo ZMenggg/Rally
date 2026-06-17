@@ -29,6 +29,7 @@ type Server struct {
 
 	runnerStatus func() []BackendStatus
 	runnerStats  func() []proxy.RatesSnapshot
+	runnerReset  func()
 
 	srv *http.Server
 }
@@ -44,13 +45,18 @@ func (s *Server) SetStatusFn(fn func() []BackendStatus) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.runnerStatus = fn
-	}
-
+}
 
 func (s *Server) SetStatsFn(fn func() []proxy.RatesSnapshot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.runnerStats = fn
+}
+
+func (s *Server) SetResetFn(fn func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.runnerReset = fn
 }
 
 func (s *Server) UpdateConfig(cfg *config.Config) {
@@ -68,6 +74,7 @@ func (s *Server) Start(addr string) error {
 	mux.HandleFunc("/api/reload", s.handleReload)
 	mux.HandleFunc("/api/logs", s.handleLogs)
 	mux.HandleFunc("/api/stats", s.handleStats)
+	mux.HandleFunc("/api/stats/reset", s.handleStatsReset)
 
 	mux.HandleFunc("/api/node/toggle", s.handleNodeToggle)
 	mux.HandleFunc("/", s.handleStatic)
@@ -133,7 +140,19 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	writeJSON(w, s.cfg)
+
+	// Return a sanitized copy (mask passwords)
+	sanitized := *s.cfg
+	sanitized.VPS = make([]config.VPS, len(s.cfg.VPS))
+	for i, v := range s.cfg.VPS {
+		sanitized.VPS[i] = v
+		if v.Password != "" && len(v.Password) > 4 {
+			sanitized.VPS[i].Password = v.Password[:1] + "****" + v.Password[len(v.Password)-1:]
+		} else if v.Password != "" {
+			sanitized.VPS[i].Password = "****"
+		}
+	}
+	writeJSON(w, sanitized)
 }
 
 func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) {
@@ -254,6 +273,8 @@ func (s *Server) handleNodeToggle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.Info("Node %s toggled to enabled=%v", req.Name, req.Enabled)
+	// Auto-reload: send SIGHUP to self so the Runner picks up the change
+	syscall.Kill(syscall.Getpid(), syscall.SIGHUP)
 	writeJSON(w, map[string]string{"status": "ok"})
 }
 
@@ -282,6 +303,35 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if statusFn != nil {
 		realBackends := statusFn()
 		if len(realBackends) > 0 {
+			// Overlay config's enabled state
+			nameEnabled := make(map[string]bool)
+			configBackends := make(map[string]BackendStatus)
+			for _, vps := range cfg.VPS {
+				en := true
+				if vps.Enabled != nil {
+					en = *vps.Enabled
+				}
+				nameEnabled[vps.Name] = en
+				configBackends[vps.Name] = BackendStatus{
+					Enabled:   en,
+					Name:      vps.Name,
+					Type:      vps.Type,
+					Server:    fmt.Sprintf("%s:%d", vps.Server, vps.Port),
+					Connected: en,
+					Active:    0,
+				}
+			}
+			for i := range realBackends {
+				if en, ok := nameEnabled[realBackends[i].Name]; ok {
+					realBackends[i].Enabled = en
+				}
+				// Remove from configBackends so we know which ones are only in config
+				delete(configBackends, realBackends[i].Name)
+			}
+			// Append config-only backends (disabled nodes not active in runner)
+			for _, cb := range configBackends {
+				realBackends = append(realBackends, cb)
+			}
 			writeJSON(w, statusResponse{
 				Backends: realBackends,
 				Uptime:   time.Now().Format(time.RFC3339),
@@ -314,7 +364,6 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 // ─── API: POST /api/reload ──────────────────────────────────────────────────
 
-
 // ─── API: GET /api/stats ────────────────────────────────────────────────
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
@@ -328,6 +377,24 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, []proxy.RatesSnapshot{})
 }
+
+// ─── API: POST /api/stats/reset ───────────────────────────────────────────
+
+func (s *Server) handleStatsReset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	s.mu.RLock()
+	fn := s.runnerReset
+	s.mu.RUnlock()
+
+	if fn != nil {
+		fn()
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
 func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -349,6 +416,9 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	logger.Info("Config reloaded from %s (%d VPS backends)", configPath, len(cfg.VPS))
+
+	// Trigger runner reload via SIGHUP
+	syscall.Kill(syscall.Getpid(), syscall.SIGHUP)
 
 	writeJSON(w, map[string]string{
 		"status":  "ok",

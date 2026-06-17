@@ -46,6 +46,10 @@
         </div>
       </div>
 
+      <div class="toolbar">
+        <button id="btnRefreshDashboard" onclick="loadDashboard()" data-i18n="refresh">Refresh</button>
+        <button id="btnResetTraffic" onclick="resetTraffic()" style="background:var(--surface2);color:var(--orange);border:1px solid var(--border);" data-i18n="resetTraffic">Reset Traffic</button>
+      </div>
       <div class="speed-bar">
         <span><span data-i18n="downSpeed">Down</span>: <strong id="statDownRate" style="color:var(--accent)">0 B/s</strong></span>
         <span><span data-i18n="upSpeed">Up</span>: <strong id="statUpRate" style="color:var(--green)">0 B/s</strong></span>
@@ -60,8 +64,8 @@
           <th data-i18n="serverCol">Server</th>
           <th data-i18n="statusCol">Status</th>
           <th data-i18n="activeConnsCol">Active</th>
-          <th data-i18n="downSpeed">Down</th>
-          <th data-i18n="upSpeed">Up</th>
+          <th data-i18n="downSpeed">下行速率</th>
+          <th data-i18n="downTraffic">Down</th>
           <th data-i18n="enabledCol">Enabled</th>
         </tr></thead>
         <tbody></tbody>

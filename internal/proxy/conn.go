@@ -133,9 +133,9 @@ func socks5ClientHandshake(conn net.Conn, targetAddr string) error {
 
 // ShadowsocksProvider connects to a remote Shadowsocks server.
 type ShadowsocksProvider struct {
-	name     string
-	server   string
-	cipher   sscore.Cipher
+	name   string
+	server string
+	cipher sscore.Cipher
 }
 
 // NewShadowsocksProvider creates a new ShadowsocksProvider.
@@ -212,13 +212,13 @@ type ssConn struct {
 	wrapped net.Conn
 }
 
-func (c *ssConn) Read(b []byte) (int, error)     { return c.wrapped.Read(b) }
-func (c *ssConn) Write(b []byte) (int, error)    { return c.wrapped.Write(b) }
-func (c *ssConn) Close() error                    { return c.raw.Close() }
-func (c *ssConn) LocalAddr() net.Addr             { return c.raw.LocalAddr() }
-func (c *ssConn) RemoteAddr() net.Addr            { return c.raw.RemoteAddr() }
-func (c *ssConn) SetDeadline(t time.Time) error   { return c.raw.SetDeadline(t) }
-func (c *ssConn) SetReadDeadline(t time.Time) error { return c.raw.SetReadDeadline(t) }
+func (c *ssConn) Read(b []byte) (int, error)         { return c.wrapped.Read(b) }
+func (c *ssConn) Write(b []byte) (int, error)        { return c.wrapped.Write(b) }
+func (c *ssConn) Close() error                       { return c.raw.Close() }
+func (c *ssConn) LocalAddr() net.Addr                { return c.raw.LocalAddr() }
+func (c *ssConn) RemoteAddr() net.Addr               { return c.raw.RemoteAddr() }
+func (c *ssConn) SetDeadline(t time.Time) error      { return c.raw.SetDeadline(t) }
+func (c *ssConn) SetReadDeadline(t time.Time) error  { return c.raw.SetReadDeadline(t) }
 func (c *ssConn) SetWriteDeadline(t time.Time) error { return c.raw.SetWriteDeadline(t) }
 
 // ─── Trojan ConnProvider ────────────────────────────────────────────────────
@@ -310,11 +310,11 @@ func (p *TrojanProvider) Dial(addr string) (net.Conn, error) {
 //	Request: 16-byte UUID + 1-byte version(0) + 1-byte cmd(1=TCP) + [atyp][addr][port]
 //	Response: 1-byte version + 1-byte status
 type VLESSProvider struct {
-	name      string
-	server    string
-	uuid      [16]byte
-	flow      string
-	sni       string
+	name   string
+	server string
+	uuid   [16]byte
+	flow   string
+	sni    string
 }
 
 // NewVLESSProvider creates a new VLESSProvider.
@@ -355,8 +355,8 @@ func (p *VLESSProvider) Dial(addr string) (net.Conn, error) {
 	// [16-byte UUID] [ver=0] [cmd=1 TCP] [portBE] [atyp] [addr...]
 	var req []byte
 	req = append(req, p.uuid[:]...)
-	req = append(req, 0x00)       // version
-	req = append(req, 0x01)       // command: TCP
+	req = append(req, 0x00) // version
+	req = append(req, 0x01) // command: TCP
 
 	portBytes := make([]byte, 2)
 	binary.BigEndian.PutUint16(portBytes, port)
@@ -381,11 +381,10 @@ func (p *VLESSProvider) Dial(addr string) (net.Conn, error) {
 		req = append(req, []byte(host)...)
 	}
 
-
-					// Add flow control padding for xtls-rprx-vision
-					if p.flow != "" {
-										req = append(req, 0x00) // padding length 0
-					}
+	// Add flow control padding for xtls-rprx-vision
+	if p.flow != "" {
+		req = append(req, 0x00) // padding length 0
+	}
 	if _, err := conn.Write(req); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("send VLESS request: %w", err)

@@ -9,10 +9,10 @@ import (
 
 // Config is the top-level configuration for Rally.
 type Config struct {
-	Bind    string     `yaml:"bind"    json:"bind"`
-	Balance string     `yaml:"balance" json:"balance"`
-	Log     LogConfig  `yaml:"log"     json:"log"`
-	VPS     []VPS      `yaml:"vps"     json:"vps"`
+	Bind    string    `yaml:"bind"    json:"bind"`
+	Balance string    `yaml:"balance" json:"balance"`
+	Log     LogConfig `yaml:"log"     json:"log"`
+	VPS     []VPS     `yaml:"vps"     json:"vps"`
 }
 
 type LogConfig struct {

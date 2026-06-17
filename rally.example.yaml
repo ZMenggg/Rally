@@ -1,0 +1,27 @@
+bind: :1080
+balance: leastconn
+
+log:
+  level: info
+  output: ""
+
+vps:
+  - name: vps-1
+    type: hysteria2
+    server: vps1.example.com
+    port: 23872
+    password: "your-password-here"
+    sni: vps1.example.com
+    down_mbps: 500
+    up_mbps: 50
+    enabled: true
+
+  - name: vps-2
+    type: hysteria2
+    server: vps2.example.com
+    port: 44705
+    password: "your-password-here"
+    sni: vps2.example.com
+    down_mbps: 500
+    up_mbps: 50
+    enabled: true

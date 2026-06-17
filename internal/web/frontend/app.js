@@ -6,8 +6,9 @@ const I18N = {zh: {
     nodeStatus:'节点状态',
     nameCol:'名称', typeCol:'类型', serverCol:'服务器',
     statusCol:'状态', activeConnsCol:'活跃', enabledCol:'启用',
+    downTraffic:'下行流量',
     portCol:'端口', passwordCol:'密码', actionsCol:'操作',
-    addNode:'+ 添加节点', refresh:'刷新',
+    addNode:'+ 添加节点', refresh:'刷新', resetTraffic:'重置流量',
     saveConfigBtn:'保存配置', reloadBtn:'重载',
     addNodeTitle:'添加节点', editNodeTitle:'编辑节点',
     nameLabel:'名称', typeLabel:'类型', serverLabel:'服务器',
@@ -35,8 +36,9 @@ const I18N = {zh: {
     nodeStatus:'Node Status',
     nameCol:'Name', typeCol:'Type', serverCol:'Server',
     statusCol:'Status', activeConnsCol:'Active', enabledCol:'Enabled',
+    downTraffic:'Down',
     portCol:'Port', passwordCol:'Password', actionsCol:'Actions',
-    addNode:'+ Add Node', refresh:'Refresh',
+    addNode:'+ Add Node', refresh:'Refresh', resetTraffic:'Reset Traffic',
     saveConfigBtn:'Save Config', reloadBtn:'Reload',
     addNodeTitle:'Add Node', editNodeTitle:'Edit Node',
     nameLabel:'Name', typeLabel:'Type', serverLabel:'Server',
@@ -86,6 +88,7 @@ const API={
   async getStats(){const r=await fetch('/api/stats');if(!r.ok)throw new Error(await r.text());return r.json()},
   async getLogs(){const r=await fetch('/api/logs');if(!r.ok)throw new Error(await r.text());return r.json()},
   async toggleNode(name,enabled){const r=await fetch('/api/node/toggle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,enabled})});if(!r.ok)throw new Error(await r.text());return r.json()},
+  async resetStats(){const r=await fetch('/api/stats/reset',{method:'POST'});if(!r.ok)throw new Error(await r.text());return r.json()},
 };
 
 let configCache=null,logAutoScroll=true,logStreamActive=false;
@@ -175,10 +178,18 @@ document.getElementById('nodeModal').addEventListener('click',e=>{if(e.target===
 
 // ─── Dashboard ───────────────────────────────────────────────────────────────
 
-async function toggleNode(name,currentlyEnabled){
+async function toggleNode(name,checked){
   try{
-    await API.toggleNode(name,!currentlyEnabled);
+    await API.toggleNode(name, checked);
     toast(t('nodeToggled'));
+    loadDashboard();
+  }catch(err){toast(err.message,'error')}
+}
+
+async function resetTraffic(){
+  try{
+    await API.resetStats();
+    toast('Traffic counters reset');
     loadDashboard();
   }catch(err){toast(err.message,'error')}
 }
@@ -197,38 +208,46 @@ async function loadDashboard(){
     if(nc)document.getElementById('statusBackends').innerHTML=`${t('nodesLabel')}: <span id="nodeCount">${nc.textContent}</span> ${t('online')}`;
     const pe=document.getElementById('statusProxy');
     pe.innerHTML=active>0?`● Proxy: <span class="online">${t('running')}</span>`:`● Proxy: <span class="offline">${t('stopped')}</span>`;
+    
+    // Build name→stats map
+    let statsMap={};
+    try{
+      const st=await API.getStats();
+      st.forEach(s=>{statsMap[s.name]=s});
+    }catch(_){}
+    
+    // Render table
     const tb=document.querySelector('#dashboardTable tbody');tb.innerHTML='';
+    let aggDownRate=0,aggUpRate=0,aggDownTotal=0,aggUpTotal=0;
     status.backends.forEach(b=>{
-      const tr=document.createElement('tr');
       const en=b.enabled!==false;
+      const s=statsMap[b.name];
+      const downBytes=s?s.write_total:0;
+      const upBytes=s?s.read_total:0;
+      const downRate=s?s.write_bps:0;
+      const upRate=s?s.read_bps:0;
+      aggDownRate+=downRate;aggUpRate+=upRate;
+      aggDownTotal+=downBytes;aggUpTotal+=upBytes;
+      
+      const tr=document.createElement('tr');
       tr.innerHTML=`
         <td>${esc(b.name)}</td>
         <td><span class="tag tag-${esc(b.type||'unknown')}">${esc(b.type||'-')}</span></td>
         <td>${esc(b.server||'-')}</td>
         <td><span class="tag ${en&&b.connected?'tag-online':'tag-offline'}">${en&&b.connected?t('onlineStatus'):t('offlineStatus')}</span></td>
         <td>${b.active||0}</td>
-        <td style="color:var(--accent);font-family:monospace;font-size:12px" id="rate-${esc(b.name)}-down">-</td>
-        <td style="color:var(--green);font-family:monospace;font-size:12px" id="rate-${esc(b.name)}-up">-</td>
+        <td style="font-family:monospace;font-size:12px;color:var(--green)">${formatBps(downRate)}</td>
+        <td style="font-family:monospace;font-size:12px;color:var(--accent)">${formatBytes(downBytes)}</td>
         <td><label class="switch"><input type="checkbox" ${en?'checked':''} onchange="toggleNode('${esc(b.name)}', this.checked)"><span class="slider"></span></label></td>
       `;
       tb.appendChild(tr);
     });
-    // Fetch traffic stats
-    try{
-      const st=await API.getStats();
-      let dr=0,wr=0,dt=0,wt=0;
-      st.forEach(s=>{
-        dr+=s.read_bps||0;wr+=s.write_bps||0;dt+=s.read_total||0;wt+=s.write_total||0;
-        const dn=document.getElementById('rate-'+s.name+'-down');
-        const up=document.getElementById('rate-'+s.name+'-up');
-        if(dn)dn.textContent=formatBps(s.read_bps||0);
-        if(up)up.textContent=formatBps(s.write_bps||0);
-      });
-      const e1=document.getElementById("statDownRate");if(e1)e1.textContent=formatBps(dr);
-      const e2=document.getElementById("statUpRate");if(e2)e2.textContent=formatBps(wr);
-      const e3=document.getElementById("statDownTotal");if(e3)e3.textContent=formatBytes(dt);
-      const e4=document.getElementById("statUpTotal");if(e4)e4.textContent=formatBytes(wt);
-    }catch(_){}
+    
+    // Update aggregate stats
+    const e1=document.getElementById("statDownRate");if(e1)e1.textContent=formatBps(aggDownRate);
+    const e2=document.getElementById("statUpRate");if(e2)e2.textContent=formatBps(aggUpRate);
+    const e3=document.getElementById("statDownTotal");if(e3)e3.textContent=formatBytes(aggDownTotal);
+    const e4=document.getElementById("statUpTotal");if(e4)e4.textContent=formatBytes(aggUpTotal);
   }catch(err){toast(t('failedLoadDashboard')+err.message,'error')}
 }
 
@@ -290,5 +309,5 @@ function esc(s){if(s==null)return'';const d=document.createElement('div');d.text
 document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('langSwitch').value=currentLang;
   applyLang(currentLang);loadDashboard();
-  setInterval(()=>{if(document.getElementById('tab-dashboard').classList.contains('active'))loadDashboard()},10000);
+  setInterval(()=>{if(document.getElementById('tab-dashboard').classList.contains('active'))loadDashboard()},5000);
 });

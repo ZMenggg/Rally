@@ -17,6 +17,7 @@ English | [中文](README.zh.md)
 - **Hot Reload** — `SIGHUP` triggers config reload without restart
 - **Live Monitoring** — Per-node throughput, aggregate speed, cumulative traffic
 - **Node Toggle** — Enable/disable nodes from dashboard with one click
+- **Health Check** — Automatic background health checks, removes dead nodes from rotation
 
 ## Architecture
 
@@ -134,7 +135,7 @@ vps:
 
 | Page | Features |
 |------|----------|
-| **Dashboard** | Node status, live throughput, cumulative traffic, node toggle |
+| **Dashboard** | Node status, live per-node & aggregate throughput, cumulative traffic, node toggle |
 | **Nodes** | Visual add/edit/delete nodes |
 | **Config** | YAML source editor |
 | **Logs** | Real-time log streaming (SSE) |
@@ -165,6 +166,7 @@ curl --parallel, yt-dlp) for maximum aggregation.
 | Hot reload | ❌ | ✅ SIGHUP |
 | Management UI | ❌ | ✅ Web Dashboard (i18n) |
 | Traffic stats | ❌ | ✅ Live rates + cumulative |
+| Health check | ❌ | ✅ Auto health checks (30s interval) |
 | Deploy | Docker only | Docker + native |
 
 ## Development

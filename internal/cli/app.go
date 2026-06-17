@@ -2,12 +2,15 @@ package cli
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	"github.com/ZMenggg/Rally/internal/config"
 	"github.com/ZMenggg/Rally/internal/logger"
+	"github.com/ZMenggg/Rally/internal/proxy"
 	"github.com/ZMenggg/Rally/internal/runner"
 	"github.com/ZMenggg/Rally/internal/web"
 )
@@ -149,6 +152,11 @@ func (a *App) runServer(args []string) error {
 	os.WriteFile("/tmp/rally.pid", []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("SIGHUP handler paniced: %v", r)
+			}
+		}()
 		for range sigCh {
 			logger.Info("Received SIGHUP, reloading config...")
 			newCfg, err := config.Load(configPath)
@@ -167,6 +175,12 @@ func (a *App) runServer(args []string) error {
 		}
 	}()
 
+	// Build name→VPS map for status enrichment
+	nameToVPS := make(map[string]config.VPS)
+	for _, v := range cfg.VPS {
+		nameToVPS[v.Name] = v
+	}
+
 	// Pass real status to Web UI
 	if ws != nil {
 		ws.SetStatusFn(func() []web.BackendStatus {
@@ -177,18 +191,42 @@ func (a *App) runServer(args []string) error {
 			info := b.Info()
 			var out []web.BackendStatus
 			for _, be := range info {
+				vps := nameToVPS[be.Name]
 				out = append(out, web.BackendStatus{
 					Name:      be.Name,
+					Type:      vps.Type,
+					Server:    net.JoinHostPort(vps.Server, strconv.Itoa(vps.Port)),
+					Enabled:   true,
 					Connected: be.Connected,
 					Active:    be.Active,
 				})
 			}
 			return out
 		})
+		ws.SetStatsFn(func() []proxy.RatesSnapshot {
+			f := r.Forwarder()
+			if f == nil {
+				return nil
+			}
+			return f.AllStats()
+		})
+		ws.SetResetFn(func() {
+			f := r.Forwarder()
+			if f == nil {
+				return
+			}
+			f.ResetStats()
+		})
 	}
 	err = r.Run()
 	defer r.Close()
-	return err
+	if err != nil {
+		logger.Error("Server stopped: %v", err)
+		return err
+	}
+	// SIGHUP graceful reload — ReloadConfig goroutine keeps the server alive.
+	// Block here so main() doesn't exit.
+	select {}
 }
 
 // ─── web ─────────────────────────────────────────────────────────────────────

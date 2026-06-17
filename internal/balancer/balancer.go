@@ -12,7 +12,32 @@ type Backend struct {
 	Provider proxy.ConnProvider
 	Weight   int
 
-	active int64
+	active  int64
+	healthy int32 // 0=healthy (default), 1=unhealthy
+}
+
+// IsHealthy reports whether the backend is currently considered healthy.
+func (b *Backend) IsHealthy() bool {
+	return atomic.LoadInt32(&b.healthy) == 0
+}
+
+// SetHealthy marks the backend as healthy or unhealthy.
+func (b *Backend) SetHealthy(h bool) {
+	v := int32(0)
+	if !h {
+		v = 1
+	}
+	atomic.StoreInt32(&b.healthy, v)
+}
+
+// SetHealth updates the healthy flag for a named backend.
+func (b *Balancer) SetHealth(name string, healthy bool) {
+	for _, be := range b.backends {
+		if be.Name == name {
+			be.SetHealthy(healthy)
+			return
+		}
+	}
 }
 
 // BackendInfo is returned for status reporting.
@@ -58,19 +83,41 @@ func (b *Balancer) Next() *Backend {
 }
 
 func (b *Balancer) roundRobin() *Backend {
-	n := b.counter.Add(1) - 1
-	return b.backends[int(n)%len(b.backends)]
+	n := len(b.backends)
+	if n == 0 {
+		return nil
+	}
+	start := int(b.counter.Add(1)-1) % n
+	for i := 0; i < n; i++ {
+		idx := (start + i) % n
+		if b.backends[idx].IsHealthy() {
+			return b.backends[idx]
+		}
+	}
+	// Fallback: all unhealthy
+	return b.backends[start]
 }
 
 func (b *Balancer) leastConn() *Backend {
-	best := b.backends[0]
-	bestActive := atomic.LoadInt64(&best.active)
-	for _, be := range b.backends[1:] {
+	n := len(b.backends)
+	if n == 0 {
+		return nil
+	}
+	var best *Backend
+	var bestActive int64 = 1<<63 - 1
+	for _, be := range b.backends {
+		if !be.IsHealthy() {
+			continue
+		}
 		a := atomic.LoadInt64(&be.active)
 		if a < bestActive {
 			best = be
 			bestActive = a
 		}
+	}
+	// Fallback: all unhealthy, use first
+	if best == nil {
+		return b.backends[0]
 	}
 	return best
 }
