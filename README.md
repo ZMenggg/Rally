@@ -1,6 +1,6 @@
-# Rally ⚡
+# Rally-go ⚡
 
-**Rally** — Fuse multiple VPS proxy connections into a single high-speed pipe,
+**Rally-go** — Fuse multiple VPS proxy connections into a single high-speed pipe,
 aggregating their bandwidth for faster downloads.
 
 Single Go binary, MIT license, Docker / bare-metal deployable.
@@ -26,7 +26,7 @@ App (any SOCKS5-compatible software)
     │  socks5://127.0.0.1:1080
     ▼
 ┌──────────────────────────────────────────┐
-│              Rally                       │
+│              Rally-go                       │
 │                                          │
 │  ┌──── SOCKS5 + Load Balancer ─────────┐ │
 │  │   connection-level roundrobin/least │ │
@@ -150,7 +150,7 @@ Supports **English / 中文** language switching.
 
 ## How Bandwidth Aggregation Works
 
-Rally does **connection-level aggregation**, not packet-level:
+Rally-go does **connection-level aggregation**, not packet-level:
 
 | Scenario | Works? | Explanation |
 |----------|--------|-------------|
@@ -163,7 +163,7 @@ curl --parallel, yt-dlp) for maximum aggregation.
 
 ## Comparison
 
-| Feature | sing-box + HAProxy | Rally |
+| Feature | sing-box + HAProxy | Rally-go |
 |---------|-------------------|-------|
 | Components | 2 containers | 1 binary |
 | License | GPLv3 | MIT |
