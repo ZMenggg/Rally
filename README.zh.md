@@ -75,7 +75,7 @@ rally run -c rally.yaml --web
 # Docker
 docker run -d -p 1080:1080 -p 9090:9090 \
   -v ./rally.yaml:/etc/rally.yaml \
-  ghcr.io/zmenggg/rally:latest
+  ghcr.io/zmenggg/rally-go:latest
 ```
 
 ### 3. 使用
@@ -104,6 +104,12 @@ vps:
     password: "secret"     # 认证密码
     sni: ""                # TLS SNI（默认用 server）
     enabled: true          # 是否启用（默认 true）
+
+    # 不安全 TLS（Hysteria2 自签名证书场景）
+    insecure: false        # 跳过 TLS 证书验证（默认 false）
+
+    # 健康检查
+    health_timeout: 15     # 健康检查超时秒数（默认 15）
 
     # Shadowsocks 专用
     cipher: AEAD_CHACHA20_POLY1305  # 加密方式
@@ -171,8 +177,8 @@ Rally 做的是 **连接级聚合**，不是数据包级聚合：
 
 ```bash
 # 依赖: Go 1.24+
-git clone https://github.com/ZMenggg/Rally.git
-cd Rally
+git clone https://github.com/ZMenggg/Rally-go.git
+cd Rally-go
 go build -o rally ./cmd/rally/
 ./rally run -c rally.yaml
 ```

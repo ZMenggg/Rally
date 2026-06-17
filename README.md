@@ -76,7 +76,7 @@ rally run -c rally.yaml --web
 # Docker
 docker run -d -p 1080:1080 -p 9090:9090 \
   -v ./rally.yaml:/etc/rally.yaml \
-  ghcr.io/zmenggg/rally:latest
+  ghcr.io/zmenggg/rally-go:latest
 ```
 
 ### 3. Use
@@ -105,6 +105,12 @@ vps:
     password: "secret"     # Auth password
     sni: ""                # TLS SNI (defaults to server)
     enabled: true          # Enable node (default true)
+
+    # Insecure TLS (Hysteria2 self-signed certs)
+    insecure: false        # Skip TLS verification (default false)
+
+    # Health check
+    health_timeout: 15     # Health check timeout (seconds, default 15)
 
     # Shadowsocks specific
     cipher: AEAD_CHACHA20_POLY1305
@@ -173,8 +179,8 @@ curl --parallel, yt-dlp) for maximum aggregation.
 
 ```bash
 # Prerequisites: Go 1.24+
-git clone https://github.com/ZMenggg/Rally.git
-cd Rally
+git clone https://github.com/ZMenggg/Rally-go.git
+cd Rally-go
 go build -o rally ./cmd/rally/
 ./rally run -c rally.yaml
 ```
