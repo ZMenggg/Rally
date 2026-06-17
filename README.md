@@ -1,35 +1,34 @@
 # Rally-go ⚡
 
-**Rally-go** — Fuse multiple VPS proxy connections into a single high-speed pipe,
-aggregating their bandwidth for faster downloads.
+**Rally-go** — 将多台 VPS 代理连接融合为一条高速管道，聚合带宽加速下载。
 
-Single Go binary, MIT license, Docker / bare-metal deployable.
+单 Go 二进制，MIT 协议，Docker / 裸机均可部署。
 
-English | [中文](README.zh.md)
+中文 | [English](README.en.md)
 
 ---
 
-## Features
+## 特性
 
-- **Multi-Protocol** — Hysteria2, SOCKS5, Shadowsocks, Trojan, VLESS
-- **Bandwidth Aggregation** — Connection-level roundrobin / leastconn load balancing
-- **Web Dashboard** — Visual node management, real-time traffic monitoring, live logs (i18n)
-- **Hot Reload** — `SIGHUP` triggers config reload without restart
-- **Live Monitoring** — Per-node throughput, aggregate speed, cumulative traffic
-- **Node Toggle** — Enable/disable nodes from dashboard with one click
-- **Health Check** — Automatic background health checks, removes dead nodes from rotation
+- **多协议支持** — Hysteria2、SOCKS5、Shadowsocks、Trojan、VLESS
+- **带宽聚合** — 连接级 roundrobin / leastconn 负载均衡
+- **Web 管理界面** — 可视化节点管理、实时流量监控、日志查看（中英文）
+- **热重载** — `SIGHUP` 信号触发配置重载，无需重启进程
+- **实时监控** — 每节点速率、总吞吐量、累计流量一目了然
+- **节点开关** — 仪表盘一键启用/禁用节点
+- **健康检查** — 后台自动检测节点连通性，异常节点自动移出轮询池
 
-## Architecture
+## 架构
 
 ```text
-App (any SOCKS5-compatible software)
+应用 (任何支持 SOCKS5 的软件)
     │  socks5://127.0.0.1:1080
     ▼
 ┌──────────────────────────────────────────┐
 │              Rally-go                       │
 │                                          │
-│  ┌──── SOCKS5 + Load Balancer ─────────┐ │
-│  │   connection-level roundrobin/least │ │
+│  ┌─── SOCKS5 处理 + 负载均衡 ─────────┐  │
+│  │   连接级 roundrobin / leastconn     │  │
 │  └──────┬──────────┬────────┬─────────┘  │
 │         │          │        │           │
 │  ┌──────▼──┐ ┌────▼──┐ ┌───▼──────┐    │
@@ -39,9 +38,9 @@ App (any SOCKS5-compatible software)
 └──────────────────────────────────────────┘
 ```
 
-## Quick Start
+## 快速开始
 
-### 1. Configuration
+### 1. 配置
 
 ```yaml
 # rally.yaml
@@ -64,13 +63,13 @@ vps:
     cipher: AEAD_CHACHA20_POLY1305
 ```
 
-### 2. Run
+### 2. 运行
 
 ```bash
-# Native
+# 裸机
 rally run -c rally.yaml
 
-# With Web UI (default :9090)
+# 同时启动 Web 管理界面（默认 :9090）
 rally run -c rally.yaml --web
 
 # Docker
@@ -79,106 +78,105 @@ docker run -d -p 1080:1080 -p 9090:9090 \
   ghcr.io/zmenggg/rally-go:latest
 ```
 
-### 3. Use
+### 3. 使用
 
 ```bash
 curl -x socks5://127.0.0.1:1080 https://www.youtube.com/watch?v=...
 ```
 
-Open http://localhost:9090 for the Web dashboard.
+打开 http://localhost:9090 查看 Web 管理界面。
 
-## Configuration Reference
+## 配置参考
 
 ```yaml
-bind: ":1080"              # SOCKS5 listen address
-balance: roundrobin        # Strategy: roundrobin | leastconn
+bind: ":1080"              # SOCKS5 监听地址
+balance: roundrobin        # 负载均衡: roundrobin | leastconn
 
 log:
   level: info              # debug | info | warn | error
-  output: ""               # log file path (empty = stderr)
+  output: ""               # 日志文件路径(空=stderr)
 
 vps:
-  - name: my-node          # Node name
-    type: hysteria2        # Protocol: hysteria2 / socks5 / ss / trojan / vless
-    server: 1.2.3.4        # Server address
-    port: 23872            # Server port
-    password: "secret"     # Auth password
-    sni: ""                # TLS SNI (defaults to server)
-    enabled: true          # Enable node (default true)
+  - name: my-node          # 节点名称
+    type: hysteria2        # 协议: hysteria2 / socks5 / ss / trojan / vless
+    server: 1.2.3.4        # 服务器地址
+    port: 23872            # 服务器端口
+    password: "secret"     # 认证密码
+    sni: ""                # TLS SNI（默认用 server）
+    enabled: true          # 是否启用（默认 true）
 
-    # Insecure TLS (Hysteria2 self-signed certs)
-    insecure: false        # Skip TLS verification (default false)
+    # 不安全 TLS（Hysteria2 自签名证书场景）
+    insecure: false        # 跳过 TLS 证书验证（默认 false）
 
-    # Health check
-    health_timeout: 15     # Health check timeout (seconds, default 15)
+    # 健康检查
+    health_timeout: 15     # 健康检查超时秒数（默认 15）
 
-    # Shadowsocks specific
-    cipher: AEAD_CHACHA20_POLY1305
+    # Shadowsocks 专用
+    cipher: AEAD_CHACHA20_POLY1305  # 加密方式
 
-    # VLESS specific
+    # VLESS 专用
     uuid: "..."            # UUID
-    flow: "xtls-rprx-vision"
+    flow: "xtls-rprx-vision"  # 流控
 
-    # Hysteria2 specific
-    down_mbps: 500         # Downlink bandwidth (Mbps)
-    up_mbps: 50            # Uplink bandwidth (Mbps)
+    # Hysteria2 专用
+    down_mbps: 500         # 下行带宽
+    up_mbps: 50            # 上行带宽
 ```
 
-## CLI Commands
+## CLI 命令
 
-| Command | Description |
-|---------|-------------|
-| `rally run -c rally.yaml` | Start proxy |
-| `rally run -c rally.yaml --web` | Start proxy + Web UI |
-| `rally run -c rally.yaml --web :8888` | Custom Web UI port |
-| `rally web -c rally.yaml` | Start Web UI only |
-| `rally web -c rally.yaml --addr :8888` | Custom port |
-| `rally check -c rally.yaml` | Validate config |
-| `rally reload` | Send SIGHUP for hot reload |
-| `rally version` | Print version |
+| 命令 | 说明 |
+|------|------|
+| `rally run -c rally.yaml` | 启动代理 |
+| `rally run -c rally.yaml --web` | 启动代理 + Web UI |
+| `rally run -c rally.yaml --web :8888` | 指定 Web UI 端口 |
+| `rally web -c rally.yaml` | 仅启动 Web UI |
+| `rally web -c rally.yaml --addr :8888` | 指定端口 |
+| `rally check -c rally.yaml` | 校验配置 |
+| `rally reload` | 发送 SIGHUP 热重载 |
+| `rally version` | 版本信息 |
 
 ## Web UI
 
-| Page | Features |
-|------|----------|
-| **Dashboard** | Node status, live per-node & aggregate throughput, cumulative traffic, node toggle |
-| **Nodes** | Visual add/edit/delete nodes |
-| **Config** | YAML source editor |
-| **Logs** | Real-time log streaming (SSE) |
+| 页面 | 功能 |
+|------|------|
+| **Dashboard** | 节点状态、每节点实时速率、汇总吞吐量、累计流量、节点开关 |
+| **Nodes** | 可视化添加/编辑/删除节点 |
+| **Config** | YAML 源码编辑器 |
+| **Logs** | 实时日志查看（SSE 推送） |
 
-Supports **English / 中文** language switching.
+支持 **中文 / English** 界面切换。
 
-## How Bandwidth Aggregation Works
+## 带宽聚合原理
 
-Rally-go does **connection-level aggregation**, not packet-level:
+Rally-go 做的是 **连接级聚合**，不是数据包级聚合：
 
-| Scenario | Works? | Explanation |
-|----------|--------|-------------|
-| Download 10 files simultaneously | ✅ **Yes** | Each connection goes to a different VPS |
-| Browse a webpage (dozens of requests) | ✅ **Yes** | Requests distributed across VPSes |
-| Single TCP stream (one large file) | ⚠️ **Single VPS** | One connection can only use one VPS |
+| 场景 | 是否聚合 | 说明 |
+|------|---------|------|
+| 同时下载 10 个文件 | ✅ **是** | 每个文件连接走不同 VPS |
+| 浏览网页（几十个请求） | ✅ **是** | 请求分发到各 VPS |
+| 单一大文件单连接下载 | ⚠️ **仅一路** | 一条连接只能用一台 VPS |
 
-**Best practice:** use multi-connection downloaders (MeTube 12 connections, qBittorrent,
-curl --parallel, yt-dlp) for maximum aggregation.
+**最佳实践：** 配合支持多路并发的下载工具（MeTube 默认 12 路、qBittorrent、curl --parallel、yt-dlp），聚合效果最明显。
 
-## Comparison
+## 与旧方案对比
 
-| Feature | sing-box + HAProxy | Rally-go |
-|---------|-------------------|-------|
-| Components | 2 containers | 1 binary |
-| License | GPLv3 | MIT |
-| Config format | JSON + CFG | YAML |
-| Protocols | Hysteria2 | Hysteria2 / SOCKS5 / SS / Trojan / VLESS |
-| Hot reload | ❌ | ✅ SIGHUP |
-| Management UI | ❌ | ✅ Web Dashboard (i18n) |
-| Traffic stats | ❌ | ✅ Live rates + cumulative |
-| Health check | ❌ | ✅ Auto health checks (30s interval) |
-| Deploy | Docker only | Docker + native |
+| 特性 | sing-box + HAProxy | Rally-go |
+|------|-------------------|-------|
+| 组件数 | 2 容器 | 1 二进制 |
+| 许可证 | GPLv3 | MIT |
+| 配置格式 | JSON + CFG | YAML |
+| 协议支持 | Hysteria2 | Hysteria2 / SOCKS5 / SS / Trojan / VLESS |
+| 热加载 | ❌ | ✅ SIGHUP |
+| 管理面板 | ❌ | ✅ Web UI（中英文） |
+| 流量监控 | ❌ | ✅ 实时速率 + 累计流量 |
+| 健康检查 | ❌ | ✅ 自动检测，30秒间隔 |
+| 部署方式 | Docker 仅 | Docker + 裸机 |
 
-## Development
+## 开发
 
 ```bash
-# Prerequisites: Go 1.24+
+# 依赖: Go 1.24+
 git clone https://github.com/ZMenggg/Rally-go.git
 cd Rally-go
 go build -o rally ./cmd/rally/
