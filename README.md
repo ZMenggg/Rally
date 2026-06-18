@@ -122,9 +122,8 @@ vps:
     # Shadowsocks 专用
     cipher: AEAD_CHACHA20_POLY1305  # 加密方式
 
-    # VLESS 专用
+    # VLESS 专用（仅支持 basic TCP；不支持 flow/XTLS）
     uuid: "..."            # UUID
-    flow: "xtls-rprx-vision"  # 流控
 
     # Hysteria2 专用
     down_mbps: 500         # 下行带宽

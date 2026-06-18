@@ -54,3 +54,56 @@ func TestAuthMiddlewareAcceptsBasicPassword(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
 	}
 }
+
+func TestMergeMaskedSecretsKeepsExistingPassword(t *testing.T) {
+	oldCfg := &config.Config{VPS: []config.VPS{{
+		Name:     "node-1",
+		Password: "supersecret",
+	}}}
+	next := &config.Config{VPS: []config.VPS{{
+		Name:     "node-1",
+		Password: "s****t",
+	}}}
+
+	mergeMaskedSecrets(next, oldCfg)
+
+	if got := next.VPS[0].Password; got != "supersecret" {
+		t.Fatalf("password = %q, want original", got)
+	}
+}
+
+func TestMergeMaskedSecretsKeepsPasswordWhenNodeRenamed(t *testing.T) {
+	oldCfg := &config.Config{VPS: []config.VPS{{
+		Name:     "old-name",
+		Password: "supersecret",
+	}}}
+	next := &config.Config{VPS: []config.VPS{{
+		Name: "new-name",
+	}}}
+
+	mergeMaskedSecrets(next, oldCfg)
+
+	if got := next.VPS[0].Password; got != "supersecret" {
+		t.Fatalf("password = %q, want original", got)
+	}
+}
+
+func TestCheckWriteRequestRejectsCrossSiteOrigin(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9090/api/reload", nil)
+	req.Host = "127.0.0.1:9090"
+	req.Header.Set("Origin", "http://evil.example")
+
+	if err := checkWriteRequest(req); err == nil {
+		t.Fatal("checkWriteRequest accepted cross-site origin")
+	}
+}
+
+func TestCheckWriteRequestAcceptsSameOrigin(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9090/api/reload", nil)
+	req.Host = "127.0.0.1:9090"
+	req.Header.Set("Origin", "http://127.0.0.1:9090")
+
+	if err := checkWriteRequest(req); err != nil {
+		t.Fatalf("checkWriteRequest error = %v", err)
+	}
+}

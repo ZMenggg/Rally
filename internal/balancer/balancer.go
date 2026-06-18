@@ -144,7 +144,7 @@ func (b *Balancer) Info() []BackendInfo {
 		info[i] = BackendInfo{
 			Name:      be.Name,
 			Active:    atomic.LoadInt64(&be.active),
-			Connected: true,
+			Connected: be.IsHealthy(),
 		}
 	}
 	return info

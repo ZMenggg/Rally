@@ -120,3 +120,17 @@ func (c *statsConn) Write(b []byte) (int, error) {
 func (c *statsConn) Close() error {
 	return c.Conn.Close()
 }
+
+func (c *statsConn) CloseWrite() error {
+	if cw, ok := c.Conn.(closeWriter); ok {
+		return cw.CloseWrite()
+	}
+	return nil
+}
+
+func (c *statsConn) CloseRead() error {
+	if cr, ok := c.Conn.(closeReader); ok {
+		return cr.CloseRead()
+	}
+	return nil
+}

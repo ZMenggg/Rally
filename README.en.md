@@ -123,9 +123,8 @@ vps:
     # Shadowsocks specific
     cipher: AEAD_CHACHA20_POLY1305
 
-    # VLESS specific
+    # VLESS specific (basic TCP only; flow/XTLS is not supported)
     uuid: "..."            # UUID
-    flow: "xtls-rprx-vision"
 
     # Hysteria2 specific
     down_mbps: 500         # Downlink bandwidth (Mbps)

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/ZMenggg/Rally-go/internal/logger"
@@ -55,19 +56,7 @@ func (p *SOCKS5Proxy) Handle(client net.Conn) {
 
 	p.sendReply(client, socksRepSuccess, nil)
 
-	// Bidirectional copy (stats tracked via statsConn wrapper)
-	done := make(chan struct{}, 2)
-
-	go func() {
-		io.Copy(remote, client)
-		done <- struct{}{}
-	}()
-	go func() {
-		io.Copy(client, remote)
-		done <- struct{}{}
-	}()
-	<-done
-	<-done
+	proxyBidirectional(client, remote)
 }
 
 // negotiate performs SOCKS5 handshake and returns target address.
@@ -162,4 +151,42 @@ func (p *SOCKS5Proxy) sendReply(conn net.Conn, rep byte, bindAddr net.Addr) {
 	resp := append([]byte{socksVer5, rep, 0x00, atyp}, addrBytes...)
 	resp = append(resp, portBytes...)
 	conn.Write(resp)
+}
+
+func proxyBidirectional(client, remote net.Conn) {
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		io.Copy(remote, client)
+		closeWrite(remote)
+		closeRead(client)
+	}()
+	go func() {
+		defer wg.Done()
+		io.Copy(client, remote)
+		closeWrite(client)
+		closeRead(remote)
+	}()
+	wg.Wait()
+}
+
+type closeWriter interface {
+	CloseWrite() error
+}
+
+type closeReader interface {
+	CloseRead() error
+}
+
+func closeWrite(conn net.Conn) {
+	if c, ok := conn.(closeWriter); ok {
+		c.CloseWrite()
+	}
+}
+
+func closeRead(conn net.Conn) {
+	if c, ok := conn.(closeReader); ok {
+		c.CloseRead()
+	}
 }

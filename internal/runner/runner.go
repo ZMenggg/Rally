@@ -48,6 +48,8 @@ func (r *Runner) Run() error {
 	defer func() {
 		r.mu.Lock()
 		r.running = false
+		r.balancer = nil
+		r.fwd = nil
 		r.mu.Unlock()
 		close(r.done)
 	}()
@@ -97,8 +99,15 @@ func (r *Runner) Run() error {
 func (r *Runner) ReloadConfig(cfg *config.Config) error {
 	r.mu.Lock()
 	if !r.running {
+		r.cfg = cfg
 		r.mu.Unlock()
-		return fmt.Errorf("not running")
+		logger.Info("Proxy is stopped, starting with reloaded config (%d VPS backend(s))", len(cfg.VPS))
+		go func() {
+			if err := r.Run(); err != nil {
+				logger.Error("Reload start: %v", err)
+			}
+		}()
+		return nil
 	}
 	if r.fwd != nil {
 		r.fwd.Stop()
