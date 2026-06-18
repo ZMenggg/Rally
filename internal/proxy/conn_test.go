@@ -41,3 +41,24 @@ func TestParsePort(t *testing.T) {
 		})
 	}
 }
+
+func TestTrojanPasswordHash(t *testing.T) {
+	got := trojanPasswordHash("password")
+	want := "d63dc919e201d7bc4c825630d2cf25fdc93d4b2f0d46706d29038d01"
+	if got != want {
+		t.Fatalf("trojanPasswordHash() = %q, want %q", got, want)
+	}
+}
+
+func TestVLESSRejectsFlow(t *testing.T) {
+	_, err := NewVLESSProvider(
+		"node",
+		"example.com:443",
+		"550e8400-e29b-41d4-a716-446655440000",
+		"xtls-rprx-vision",
+		"example.com",
+	)
+	if err == nil {
+		t.Fatal("NewVLESSProvider accepted unsupported flow")
+	}
+}

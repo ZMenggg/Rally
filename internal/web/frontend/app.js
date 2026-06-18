@@ -139,7 +139,8 @@ function showNodeForm(index){
     document.getElementById('nodeType').value=n.type||'hysteria2';
     document.getElementById('nodeServer').value=n.server||'';
     document.getElementById('nodePort').value=n.port||'';
-    document.getElementById('nodePassword').value=n.password||'';
+    document.getElementById('nodePassword').value=isMaskedPassword(n.password)?'':(n.password||'');
+    document.getElementById('nodePassword').placeholder=isMaskedPassword(n.password)?'Leave blank to keep existing password':'Auth password';
     document.getElementById('nodeSNI').value=n.sni||'';
     document.getElementById('nodeCipher').value=n.cipher||'AEAD_CHACHA20_POLY1305';
     document.getElementById('nodeUUID').value=n.uuid||'';
@@ -156,7 +157,8 @@ async function submitNode(e){
   e.preventDefault();
   const t=document.getElementById('nodeType').value;
   const node={name:document.getElementById('nodeName').value,type:t,server:document.getElementById('nodeServer').value,port:parseInt(document.getElementById('nodePort').value)};
-  if(t!=='vless')node.password=document.getElementById('nodePassword').value;
+  const password=document.getElementById('nodePassword').value;
+  if(t!=='vless'&&password)node.password=password;
   if(t==='hysteria2'||t==='trojan'||t==='vless')node.sni=document.getElementById('nodeSNI').value||undefined;
   if(t==='ss')node.cipher=document.getElementById('nodeCipher').value;
   if(t==='vless'){node.uuid=document.getElementById('nodeUUID').value;node.flow=document.getElementById('nodeFlow').value||undefined}
@@ -238,8 +240,10 @@ async function loadDashboard(){
         <td>${b.active||0}</td>
         <td style="font-family:monospace;font-size:12px;color:var(--green)">${formatBps(downRate)}</td>
         <td style="font-family:monospace;font-size:12px;color:var(--accent)">${formatBytes(downBytes)}</td>
-        <td><label class="switch"><input type="checkbox" ${en?'checked':''} onchange="toggleNode('${esc(b.name)}', this.checked)"><span class="slider"></span></label></td>
+        <td><label class="switch"><input type="checkbox" ${en?'checked':''}><span class="slider"></span></label></td>
       `;
+      const input=tr.querySelector('input[type="checkbox"]');
+      input.addEventListener('change',()=>toggleNode(b.name,input.checked));
       tb.appendChild(tr);
     });
     
@@ -260,7 +264,10 @@ async function loadNodes(){
     vps.forEach((n,i)=>{
       const tr=document.createElement('tr');
       let pw=n.password||"";const pwDisplay=pw?pw.slice(0,1)+"••••"+pw.slice(-1):"";
-      tr.innerHTML=`<td><strong>${esc(n.name)}</strong></td><td><span class="tag tag-${esc(n.type||'hysteria2')}">${esc(n.type||'hysteria2')}</span></td><td>${esc(n.server)}</td><td>${n.port}</td><td style="font-family:monospace;font-size:12px;color:var(--text2)">${esc(pwDisplay)}</td><td><button class="btn-icon" onclick="showNodeForm(${i})">${t('edit')}</button><button class="btn-icon btn-danger" onclick="deleteNode(${i})">${t('delete')}</button></td>`;
+      tr.innerHTML=`<td><strong>${esc(n.name)}</strong></td><td><span class="tag tag-${esc(n.type||'hysteria2')}">${esc(n.type||'hysteria2')}</span></td><td>${esc(n.server)}</td><td>${n.port}</td><td style="font-family:monospace;font-size:12px;color:var(--text2)">${esc(pwDisplay)}</td><td><button class="btn-icon" type="button">${t('edit')}</button><button class="btn-icon btn-danger" type="button">${t('delete')}</button></td>`;
+      const [editBtn,deleteBtn]=tr.querySelectorAll('button');
+      editBtn.addEventListener('click',()=>showNodeForm(i));
+      deleteBtn.addEventListener('click',()=>deleteNode(i));
       tb.appendChild(tr);
     });
   }catch(err){toast(t('failedLoadNodes')+err.message,'error')}
@@ -303,6 +310,7 @@ function formatBps(bps){if(bps<1024)return bps.toFixed(0)+' B/s';if(bps<1048576)
 function formatBytes(b){if(b<1024)return b+' B';if(b<1048576)return(b/1024).toFixed(1)+' KB';if(b<1073741824)return(b/1048576).toFixed(1)+' MB';return(b/1073741824).toFixed(2)+' GB';}
 
 function esc(s){if(s==null)return'';const d=document.createElement('div');d.textContent=String(s);return d.innerHTML}
+function isMaskedPassword(s){return typeof s==='string'&&(s==='****'||s.includes('****'))}
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 

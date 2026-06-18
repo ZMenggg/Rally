@@ -1,8 +1,10 @@
 package proxy
 
 import (
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
@@ -12,6 +14,8 @@ import (
 
 	sscore "github.com/shadowsocks/go-shadowsocks2/core"
 )
+
+const providerHandshakeTimeout = 10 * time.Second
 
 // ─── SOCKS5 ConnProvider ────────────────────────────────────────────────────
 
@@ -35,11 +39,19 @@ func (p *SOCKS5Provider) Dial(addr string) (net.Conn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connect to SOCKS5 proxy: %w", err)
 	}
+	if err := proxyConn.SetDeadline(time.Now().Add(providerHandshakeTimeout)); err != nil {
+		proxyConn.Close()
+		return nil, fmt.Errorf("set SOCKS5 deadline: %w", err)
+	}
 
 	// Perform SOCKS5 handshake as a client
 	if err := socks5ClientHandshake(proxyConn, addr); err != nil {
 		proxyConn.Close()
 		return nil, fmt.Errorf("SOCKS5 handshake: %w", err)
+	}
+	if err := proxyConn.SetDeadline(time.Time{}); err != nil {
+		proxyConn.Close()
+		return nil, fmt.Errorf("clear SOCKS5 deadline: %w", err)
 	}
 
 	return proxyConn, nil
@@ -165,6 +177,10 @@ func (p *ShadowsocksProvider) Dial(addr string) (net.Conn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connect to shadowsocks server: %w", err)
 	}
+	if err := conn.SetDeadline(time.Now().Add(providerHandshakeTimeout)); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("set shadowsocks deadline: %w", err)
+	}
 
 	// Wrap with encryption
 	shadowed := p.cipher.StreamConn(conn)
@@ -209,6 +225,10 @@ func (p *ShadowsocksProvider) Dial(addr string) (net.Conn, error) {
 		conn.Close()
 		return nil, fmt.Errorf("send target address: %w", err)
 	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("clear shadowsocks deadline: %w", err)
+	}
 
 	return &ssConn{raw: conn, wrapped: shadowed}, nil
 }
@@ -227,11 +247,23 @@ func (c *ssConn) RemoteAddr() net.Addr               { return c.raw.RemoteAddr()
 func (c *ssConn) SetDeadline(t time.Time) error      { return c.raw.SetDeadline(t) }
 func (c *ssConn) SetReadDeadline(t time.Time) error  { return c.raw.SetReadDeadline(t) }
 func (c *ssConn) SetWriteDeadline(t time.Time) error { return c.raw.SetWriteDeadline(t) }
+func (c *ssConn) CloseWrite() error {
+	if cw, ok := c.raw.(closeWriter); ok {
+		return cw.CloseWrite()
+	}
+	return nil
+}
+func (c *ssConn) CloseRead() error {
+	if cr, ok := c.raw.(closeReader); ok {
+		return cr.CloseRead()
+	}
+	return nil
+}
 
 // ─── Trojan ConnProvider ────────────────────────────────────────────────────
 
 // TrojanProvider connects to a remote Trojan server.
-// Trojan protocol: TLS connection, then send `password\r\n` + request.
+// Trojan protocol: TLS connection, then send SHA224(password) hex + CRLF + request.
 type TrojanProvider struct {
 	name     string
 	server   string
@@ -264,8 +296,13 @@ func (p *TrojanProvider) Dial(addr string) (net.Conn, error) {
 		return nil, fmt.Errorf("trojan TLS dial: %w", err)
 	}
 
-	// 2. Send password + CRLF
-	payload := []byte(p.password + "\r\n")
+	if err := tlsConn.SetDeadline(time.Now().Add(providerHandshakeTimeout)); err != nil {
+		tlsConn.Close()
+		return nil, fmt.Errorf("set trojan deadline: %w", err)
+	}
+
+	// 2. Send password hash + CRLF
+	payload := []byte(trojanPasswordHash(p.password) + "\r\n")
 
 	// 3. Trojan request format:
 	//    [atyp (1)] [addr (var)] [port (2)] [CRLF]
@@ -308,8 +345,17 @@ func (p *TrojanProvider) Dial(addr string) (net.Conn, error) {
 		tlsConn.Close()
 		return nil, fmt.Errorf("trojan send request: %w", err)
 	}
+	if err := tlsConn.SetDeadline(time.Time{}); err != nil {
+		tlsConn.Close()
+		return nil, fmt.Errorf("clear trojan deadline: %w", err)
+	}
 
 	return tlsConn, nil
+}
+
+func trojanPasswordHash(password string) string {
+	sum := sha256.Sum224([]byte(password))
+	return hex.EncodeToString(sum[:])
 }
 
 // ─── VLESS ConnProvider ─────────────────────────────────────────────────────
@@ -329,6 +375,9 @@ type VLESSProvider struct {
 
 // NewVLESSProvider creates a new VLESSProvider.
 func NewVLESSProvider(name, server, uuid, flow, sni string) (*VLESSProvider, error) {
+	if flow != "" {
+		return nil, fmt.Errorf("VLESS flow %q is not supported by the basic TCP provider", flow)
+	}
 	if sni == "" {
 		sni = server
 	}
@@ -351,6 +400,10 @@ func (p *VLESSProvider) Dial(addr string) (net.Conn, error) {
 	conn, err := net.DialTimeout("tcp", p.server, 10*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("connect to VLESS server: %w", err)
+	}
+	if err := conn.SetDeadline(time.Now().Add(providerHandshakeTimeout)); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("set VLESS deadline: %w", err)
 	}
 
 	host, portStr, err := net.SplitHostPort(addr)
@@ -394,10 +447,6 @@ func (p *VLESSProvider) Dial(addr string) (net.Conn, error) {
 		req = append(req, []byte(host)...)
 	}
 
-	// Add flow control padding for xtls-rprx-vision
-	if p.flow != "" {
-		req = append(req, 0x00) // padding length 0
-	}
 	if _, err := conn.Write(req); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("send VLESS request: %w", err)
@@ -413,6 +462,10 @@ func (p *VLESSProvider) Dial(addr string) (net.Conn, error) {
 	if resp[1] != 0x00 {
 		conn.Close()
 		return nil, fmt.Errorf("VLESS request rejected: status %d", resp[1])
+	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("clear VLESS deadline: %w", err)
 	}
 
 	return conn, nil

@@ -5,6 +5,8 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"net/url"
+
 	"github.com/ZMenggg/Rally-go/internal/config"
 	"github.com/ZMenggg/Rally-go/internal/logger"
 	"github.com/ZMenggg/Rally-go/internal/proxy"
@@ -19,6 +21,8 @@ import (
 
 	"time"
 )
+
+const maxConfigBodyBytes = 1 << 20
 
 //go:embed frontend/index.html frontend/style.css frontend/app.js
 var frontendFS embed.FS
@@ -158,6 +162,44 @@ func authTokenFromRequest(r *http.Request) string {
 	return ""
 }
 
+func checkWriteRequest(r *http.Request) error {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+		return nil
+	}
+	if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" && site != "none" {
+		return fmt.Errorf("cross-site request rejected")
+	}
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return nil
+	}
+	originURL, err := url.Parse(origin)
+	if err != nil {
+		return fmt.Errorf("invalid origin")
+	}
+	if !sameHost(originURL.Host, r.Host) {
+		return fmt.Errorf("origin %q is not allowed", origin)
+	}
+	return nil
+}
+
+func sameHost(a, b string) bool {
+	ah, ap, errA := net.SplitHostPort(a)
+	bh, bp, errB := net.SplitHostPort(b)
+	if errA == nil && errB == nil {
+		return strings.EqualFold(ah, bh) && ap == bp
+	}
+	return strings.EqualFold(a, b)
+}
+
+func requireWriteRequest(w http.ResponseWriter, r *http.Request) bool {
+	if err := checkWriteRequest(r); err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
 // ─── Static ─────────────────────────────────────────────────────────────────
 
 func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
@@ -217,6 +259,10 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) {
+	if !requireWriteRequest(w, r) {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxConfigBodyBytes)
 	var cfg config.Config
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
 		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
@@ -233,6 +279,7 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) {
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = s.cfg.Log.Level
 	}
+	mergeMaskedSecrets(&cfg, s.cfg)
 	s.mu.Unlock()
 
 	if err := config.Save(s.configPath, &cfg); err != nil {
@@ -246,7 +293,10 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("Config saved via API (%d VPS backends)", len(cfg.VPS))
 	// Auto-reload: send SIGHUP to self
-	syscall.Kill(syscall.Getpid(), syscall.SIGHUP)
+	if err := signalReload(); err != nil {
+		http.Error(w, "Reload signal error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	writeJSON(w, map[string]string{"status": "ok"})
 }
 
@@ -274,6 +324,10 @@ func (s *Server) getConfigRaw(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) putConfigRaw(w http.ResponseWriter, r *http.Request) {
+	if !requireWriteRequest(w, r) {
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxConfigBodyBytes)
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Read error: "+err.Error(), http.StatusBadRequest)
@@ -296,7 +350,10 @@ func (s *Server) putConfigRaw(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	logger.Info("Raw config saved via API (%d VPS backends)", len(cfg.VPS))
-	syscall.Kill(syscall.Getpid(), syscall.SIGHUP)
+	if err := signalReload(); err != nil {
+		http.Error(w, "Reload signal error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	writeJSON(w, map[string]string{"status": "ok"})
 }
 
@@ -305,6 +362,9 @@ func (s *Server) putConfigRaw(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleNodeToggle(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireWriteRequest(w, r) {
 		return
 	}
 
@@ -335,7 +395,10 @@ func (s *Server) handleNodeToggle(w http.ResponseWriter, r *http.Request) {
 
 	logger.Info("Node %s toggled to enabled=%v", req.Name, req.Enabled)
 	// Auto-reload: send SIGHUP to self so the Runner picks up the change
-	syscall.Kill(syscall.Getpid(), syscall.SIGHUP)
+	if err := signalReload(); err != nil {
+		http.Error(w, "Reload signal error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	writeJSON(w, map[string]string{"status": "ok"})
 }
 
@@ -446,6 +509,9 @@ func (s *Server) handleStatsReset(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireWriteRequest(w, r) {
+		return
+	}
 	s.mu.RLock()
 	fn := s.runnerReset
 	s.mu.RUnlock()
@@ -459,6 +525,9 @@ func (s *Server) handleStatsReset(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireWriteRequest(w, r) {
 		return
 	}
 
@@ -479,7 +548,10 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 	logger.Info("Config reloaded from %s (%d VPS backends)", configPath, len(cfg.VPS))
 
 	// Trigger runner reload via SIGHUP
-	syscall.Kill(syscall.Getpid(), syscall.SIGHUP)
+	if err := signalReload(); err != nil {
+		http.Error(w, "Reload signal error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	writeJSON(w, map[string]string{
 		"status":  "ok",
@@ -546,4 +618,45 @@ func (s *Server) handleLogSSE(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
+}
+
+func signalReload() error {
+	return syscall.Kill(syscall.Getpid(), syscall.SIGHUP)
+}
+
+func mergeMaskedSecrets(next, prev *config.Config) {
+	if next == nil || prev == nil {
+		return
+	}
+	oldByName := make(map[string]config.VPS, len(prev.VPS))
+	for _, vps := range prev.VPS {
+		oldByName[vps.Name] = vps
+	}
+	for i := range next.VPS {
+		old, ok := oldByName[next.VPS[i].Name]
+		if !ok && i < len(prev.VPS) {
+			old = prev.VPS[i]
+			ok = true
+		}
+		if !ok {
+			continue
+		}
+		if next.VPS[i].Password == "" || isMaskedSecret(next.VPS[i].Password, old.Password) {
+			next.VPS[i].Password = old.Password
+		}
+	}
+}
+
+func isMaskedSecret(candidate, original string) bool {
+	if original == "" || candidate == "" {
+		return false
+	}
+	if candidate == "****" {
+		return true
+	}
+	if len(original) > 4 {
+		want := original[:1] + "****" + original[len(original)-1:]
+		return candidate == want
+	}
+	return false
 }
